@@ -1,0 +1,5 @@
+# ПК-приложение FlexGlove (Python 3.11+)
+fastapi>=0.110
+uvicorn[standard]>=0.29
+bleak>=0.22
+pyserial>=3.5

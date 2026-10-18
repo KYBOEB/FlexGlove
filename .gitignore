@@ -1,0 +1,21 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+*.egg-info/
+
+# Данные: записи сессий, базы, датасеты — не в git
+data/*
+!data/.gitkeep
+
+# IDE / ОС
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# PlatformIO / Arduino
+.pio/
+build/
