@@ -25,7 +25,9 @@
   пользователь переносит его в планировщик.
 
 ## Технические правила
-- Python 3.11+, FastAPI, bleak, pyserial, SQLite; интерфейс — HTML/JS без сборщика (`host/flexglove/web`).
+- Основная платформа — **Windows 10/11** (запуск `FlexGlove.bat`); macOS/Linux должны продолжать работать.
+- Python 3.10+, FastAPI, bleak, pyserial, SQLite; интерфейс — HTML/JS без сборщика (`host/flexglove/web`).
+- Пути — через `pathlib`, никаких POSIX-специфичных вещей в основном коде; `.bat` — с окончаниями строк CRLF.
 - Всё в одном цикле asyncio; блокирующие операции — в потоках (`asyncio.to_thread`).
 - Демо-режим (`python -m flexglove --demo`) должен работать после любого изменения — это среда разработки и резерв на защите.
 - Новый код — с тестами pytest (`cd host && python -m pytest -q`); перед завершением этапа все тесты зелёные.
