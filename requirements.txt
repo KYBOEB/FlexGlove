@@ -1,4 +1,4 @@
-# ПК-приложение FlexGlove (Python 3.11+)
+# FlexGlove host application (Python 3.10+)
 fastapi>=0.110
 uvicorn[standard]>=0.29
 bleak>=0.22

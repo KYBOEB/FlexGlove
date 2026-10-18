@@ -22,37 +22,35 @@
 
 ## Быстрый старт
 
-Нужен Python 3.11–3.13.
+### Windows — основной вариант
+1. Нужен Python 3.10+ (если нет: `winget install Python.Python.3.12` или python.org с галочкой «Add python.exe to PATH»).
+2. Двойной щелчок по **`FlexGlove.bat`** (с перчаткой) или **`FlexGlove-demo.bat`** (демо без железа).
+3. Первый запуск 1–2 минуты: создаётся окружение `.venv`, пакеты ставятся из папки `wheels/` без интернета
+   (папка есть в сборке `FlexGlove-Windows.zip`; без неё пакеты скачаются из интернета).
+4. Интерфейс откроется **отдельным окном** (Edge/Chrome в режиме приложения). Чёрное окно консоли не закрывайте — это сервер приложения.
 
-**macOS / Linux**
+Если Windows пишет «Система Windows защитила ваш компьютер» — «Подробнее» → «Выполнить в любом случае»
+(или «Свойства» файла → «Разблокировать»).
+
+### Вручную (Windows / macOS / Linux)
 ```bash
 cd host
-python3 -m venv .venv
-source .venv/bin/activate
+python -m venv .venv
+.venv\Scripts\activate          # macOS/Linux: source .venv/bin/activate
 pip install -r ../requirements.txt
-python -m flexglove --demo      # демо-режим, браузер откроется сам
-```
-
-**Windows (PowerShell)**
-```powershell
-cd host
-py -m venv .venv
-.venv\Scripts\Activate.ps1
-pip install -r ..\requirements.txt
 python -m flexglove --demo
 ```
-
-Без `--demo` приложение стартует без источника — подключение выбирается на вкладке «Настройки».
-Параметры: `--port 8000`, `--no-browser`, `--db путь/к/базе.db`.
+Параметры: `--demo`, `--port 8000` (если занят — берётся следующий свободный), `--ui app|browser|none`, `--db путь.db`.
 
 ### Подключение перчатки
 
 1. **Bluetooth LE** (ESP32-S3 умеет только BLE): «Настройки» → «Bluetooth LE» → «Найти устройства» → «Подключить».
    Приложение само подписывается на все notify-характеристики устройства, знать UUID не нужно.
-   *macOS:* при первом поиске система спросит разрешение на Bluetooth для Терминала/IDE. Если отказали —
-   «Системные настройки → Конфиденциальность и безопасность → Bluetooth». Перчатку **не нужно** сопрягать в настройках macOS.
+   Перчатку **не нужно** сопрягать в настройках Windows. Нужны Windows 10 (1809+) или 11 и включённый Bluetooth.
+   *macOS:* при первом поиске система спросит разрешение на Bluetooth для Терминала/IDE.
 2. **Порт**: USB-кабель или Bluetooth Classic (BluetoothSerial на обычном ESP32 — после сопряжения в системе появится
-   порт `/dev/cu.<имя>` на macOS или `COMx` на Windows). Каждая строка — одно сообщение.
+   порт `COMx` на Windows — берите исходящий из двух «Стандартный последовательный порт по Bluetooth»,
+   на macOS — `/dev/cu.<имя>`). Каждая строка — одно сообщение.
 3. **Демо**: имитация без железа, комбинации — кнопками или клавишами `0–3`.
 
 Если перчатка шлёт что-то непонятное — откройте «Настройки → Отладка потока»: там видно последнее сырое сообщение,
@@ -72,6 +70,8 @@ host/flexglove/
   web/               интерфейс: index.html, app.js, hand.js, style.css
 host/tests/          pytest
 firmware/examples/   эталонный скетч ESP32 для проверки связи
+tools/               сборка Windows-архива с офлайн-пакетами
+FlexGlove.bat        запуск на Windows (FlexGlove-demo.bat — демо-режим)
 docs/                протокол, архитектура, план, решения, материалы для Cowork
 ```
 

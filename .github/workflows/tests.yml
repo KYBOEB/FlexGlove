@@ -2,7 +2,10 @@ name: tests
 on: [push, pull_request]
 jobs:
   host:
-    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        os: [windows-latest, ubuntu-latest]
+    runs-on: ${{ matrix.os }}
     defaults:
       run:
         working-directory: host
@@ -13,3 +16,6 @@ jobs:
           python-version: "3.12"
       - run: pip install -r ../requirements-dev.txt
       - run: python -m pytest -q
+      - name: Windows BLE backend imports
+        if: runner.os == 'Windows'
+        run: python -c "from bleak.backends.winrt.scanner import BleakScannerWinRT; print('winrt ok')"

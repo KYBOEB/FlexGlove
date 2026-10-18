@@ -19,3 +19,5 @@ Thumbs.db
 # PlatformIO / Arduino
 .pio/
 build/
+wheels/
+dist/

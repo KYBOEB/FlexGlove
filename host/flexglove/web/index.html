@@ -112,14 +112,14 @@
         </div>
 
         <div class="src-panel" data-panel="ble">
-          <p class="hint">ESP32-S3 поддерживает только BLE. Нажмите «Найти», выберите перчатку и подключитесь.</p>
+          <p class="hint">ESP32-S3 поддерживает только BLE. Включите Bluetooth на компьютере, нажмите «Найти», выберите перчатку и подключитесь. Сопрягать перчатку в настройках Windows не нужно.</p>
           <button id="bleScan">Найти устройства</button>
           <label class="check"><input type="checkbox" id="bleOnlyNamed" checked> только с именем</label>
           <ul class="devlist" id="bleList"></ul>
         </div>
 
         <div class="src-panel" data-panel="serial" hidden>
-          <p class="hint">USB-кабель или Bluetooth Classic (BluetoothSerial на обычном ESP32 — после сопряжения в системе появится порт).</p>
+          <p class="hint">USB-кабель или Bluetooth Classic (BluetoothSerial на обычном ESP32). Windows: после сопряжения перчатки в «Параметры → Bluetooth» появятся COM-порты «Стандартный последовательный порт по Bluetooth» — выбирайте исходящий (обычно первый из двух).</p>
           <div class="row">
             <select id="serialPort"><option value="">— порт —</option></select>
             <select id="serialBaud">
