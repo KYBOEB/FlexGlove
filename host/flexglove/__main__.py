@@ -1,7 +1,7 @@
 """Запуск: python -m flexglove [--demo] [--port 8000] [--ui app|browser|none]
 
-На Windows интерфейс по умолчанию открывается отдельным окном (Microsoft Edge / Chrome
-в режиме приложения — без адресной строки и вкладок), на других ОС — во вкладке браузера.
+Консольный запуск для разработки (видны сообщения сервера). Обычный запуск без консоли —
+FlexGlove.pyw или ярлык на рабочем столе (модуль flexglove.desktop).
 """
 from __future__ import annotations
 
@@ -76,8 +76,8 @@ def main() -> None:
     parser.add_argument("--port", type=int, default=8000)
     parser.add_argument("--db", default=str(DEFAULT_DB), help="путь к базе SQLite")
     parser.add_argument("--demo", action="store_true", help="сразу включить демо-режим (без железа)")
-    parser.add_argument("--ui", choices=["app", "browser", "none"], default="app",
-                        help="app — отдельное окно (Windows), browser — вкладка браузера, none — не открывать")
+    parser.add_argument("--ui", choices=["browser", "app", "none"], default="browser",
+                        help="browser — браузер по умолчанию, app — отдельное окно Edge/Chrome, none — не открывать")
     parser.add_argument("--no-browser", action="store_true", help="то же, что --ui none")
     args = parser.parse_args()
 

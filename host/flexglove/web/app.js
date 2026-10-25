@@ -1,17 +1,22 @@
-/* FlexGlove — интерфейс. Получает состояние по WebSocket (/ws) и отправляет команды через REST (/api). */
+/* FlexGlove — интерфейс пульта. Состояние приходит по WebSocket (/ws) ~30 раз в секунду,
+   команды уходят через REST (/api). */
 (function () {
   const $ = (s) => document.querySelector(s);
   const $$ = (s) => Array.from(document.querySelectorAll(s));
+  const STATE_TEXT = {
+    active: "Управление активно", disarmed: "Управление заблокировано",
+    hold: "Захват зафиксирован", no_link: "Нет связи с перчаткой",
+  };
+  const MODE_TEXT = { calibrated: "калибровка", auto: "автокалибровка", uncalibrated: "нет калибровки", bits: "биты 0/1" };
 
-  let META = { actions: [], fingers: [] };
-  let S = null;                 // последнее состояние от сервера
-  let srcKindUI = "ble";        // выбранная вкладка источника
-  let renderedBindKey = "";     // чтобы не перерисовывать таблицу без изменений
-  let renderedMapKey = "";
+  let META = { actions: [], fingers: [], version: "" };
+  let S = null;
   let lastEventTs = 0;
+  let bindKey = "", mapKey = "", tableKey = "";
 
-  const handMain = new HandView($("#handMain"));
+  const handMain = new HandView($("#handMain"), { onFinger: (f) => demoToggleFinger(f) });
   const handSettings = new HandView($("#handSettings"));
+  const chart = new LaneChart($("#chart"));
 
   // ---------------- утилиты ----------------
   async function api(path, opts = {}) {
@@ -21,7 +26,7 @@
       body: opts.body ? JSON.stringify(opts.body) : undefined,
     });
     const data = await res.json().catch(() => ({}));
-    if (!res.ok) throw new Error(data.detail ? (typeof data.detail === "string" ? data.detail : JSON.stringify(data.detail)) : res.statusText);
+    if (!res.ok) throw new Error(typeof data.detail === "string" ? data.detail : res.statusText);
     return data;
   }
   let toastTimer;
@@ -30,30 +35,27 @@
     t.textContent = msg; t.className = "toast" + (err ? " err" : ""); t.hidden = false;
     clearTimeout(toastTimer); toastTimer = setTimeout(() => (t.hidden = true), 3500);
   }
-  const actionTitle = (id) => (META.actions.find((a) => a.id === id) || {}).title || id;
-  const fingerName = (f) => (window.FINGER_NAMES[f] || f);
-  function combosFor(n) {
-    const out = [];
-    for (let i = 0; i < 2 ** n; i++) out.push(i.toString(2).padStart(n, "0"));
+  const act = (id) => META.actions.find((a) => a.id === id) || { title: id, on_label: "вкл", off_label: "выкл" };
+  const fname = (f) => window.FINGER_NAMES[f] || f;
+  const pct = (x) => `${Math.round((x || 0) * 100)}%`;
+  const combosFor = (n) => Array.from({ length: 2 ** n }, (_, i) => i.toString(2).padStart(n, "0").split("").reverse().join(""))
+    .sort((a, b) => (a.split("1").length - b.split("1").length) || (a < b ? 1 : -1));
+  function bendsByFinger(values, map) {
+    const out = {};
+    values.forEach((v, i) => { if (map[i]) out[map[i]] = v; });
     return out;
   }
-  function bentFingers(combo, map) {
-    const names = [];
-    [...combo].forEach((c, i) => { if (c === "1" && map[i]) names.push(fingerName(map[i])); });
-    return names.length ? names.join(", ") : "нет (покой)";
-  }
-  function bendsFrom(combo, map) {
-    const bends = {};
-    if (!combo) return bends;
-    [...combo].forEach((c, i) => { if (map[i]) bends[map[i]] = c === "1" ? 1 : 0; });
-    return bends;
+  function bentNames(combo, map) {
+    const names = [...combo].map((c, i) => (c === "1" ? fname(map[i]) : null)).filter(Boolean);
+    return names.length ? names.join(", ") : "все разогнуты";
   }
 
   // ---------------- вкладки ----------------
   function showTab() {
-    const tab = location.hash === "#settings" ? "settings" : "main";
+    const tab = ["#signals", "#settings"].includes(location.hash) ? location.hash.slice(1) : "control";
     $$(".page").forEach((p) => (p.hidden = p.id !== "tab-" + tab));
     $$(".tab").forEach((a) => a.classList.toggle("active", a.dataset.tab === tab));
+    if (tab === "signals") refreshRecordings();
   }
   window.addEventListener("hashchange", showTab);
 
@@ -61,7 +63,6 @@
   function connectWS() {
     const ws = new WebSocket(`ws://${location.host}/ws`);
     ws.onmessage = (e) => { S = JSON.parse(e.data); render(); };
-    ws.onopen = () => { $("#connText").textContent = "Приложение запущено"; };
     ws.onclose = () => {
       $("#connDot").className = "dot"; $("#connText").textContent = "Нет связи с приложением — переподключаюсь…";
       setTimeout(connectWS, 1000);
@@ -69,138 +70,205 @@
   }
 
   // ---------------- отрисовка ----------------
-  let srcTabSynced = false;
   function render() {
-    if (!S) return;
-    const src = S.source || {};
-    if (!srcTabSynced && src.kind) {  // открыть вкладку того источника, который уже подключён
-      srcTabSynced = true;
-      const btn = document.querySelector(`#srcKind button[data-kind="${src.kind}"]`);
-      if (btn) btn.click();
-    }
-    const connected = !!src.connected;
-    const map = S.finger_map_full || [];
-    const live = S.raw;
+    const src = S.source || {}, connected = !!src.connected, n = S.n_channels, map = S.finger_map;
+    const chans = S.channels || [];
 
-    // шапка
     $("#connDot").className = "dot" + (connected ? " ok" : src.kind ? " wait" : "");
     $("#connText").textContent = connected ? `${src.name || "Устройство"} подключено` : (src.message || "Не подключено");
     $("#connRate").textContent = connected ? `${S.stats.rate} сообщ./с` : "";
     $("#noDeviceBanner").hidden = connected;
 
-    // рука и комбинация
-    const n = S.n_channels;
-    const mapN = map.slice(0, n);
-    const bends = bendsFrom(live, mapN);
-    if (!live) mapN.forEach((f) => (bends[f] = 0));
+    // рука
+    const bends = bendsByFinger(chans.map((c) => (c.stale ? 0 : c.bend)), map);
     handMain.set(bends); handSettings.set(bends);
-    $("#mainCombo").textContent = live || "—";
-    $("#setCombo").textContent = live || "—";
+    $("#mainCombo").textContent = S.combo || "—";
     const bound = S.committed && S.bindings[S.committed];
-    $("#mainTarget").textContent = bound ? `→ ${actionTitle(bound)}` : (S.committed ? "жест не привязан" : "");
+    $("#mainTarget").textContent = bound ? `→ ${act(bound).title}` : "";
+    renderBendBars(chans, map);
 
-    // объекты
-    const comboOf = {};
-    for (const [combo, a] of Object.entries(S.bindings)) comboOf[a] = combo;
-    $$(".action").forEach((card) => {
-      const id = card.dataset.action;
-      const on = !!S.actions[id];
-      const meta = META.actions.find((a) => a.id === id) || {};
-      card.classList.toggle("on", on);
-      card.querySelector(".a-state").textContent = on ? meta.on_label : meta.off_label;
-      const c = comboOf[id];
-      const html = c ? `жест <span class="chip">${c}</span>` : `<span class="chip none">жест не привязан</span>`;
-      const bindEl = card.querySelector(".a-bind");
-      if (bindEl.innerHTML !== html) bindEl.innerHTML = html;
-    });
-
-    // журнал
+    // контроллер и сцена
+    const c = S.controller;
+    const st = $("#ctlState"); st.className = "ctl-state " + c.state; st.textContent = STATE_TEXT[c.state] || c.state;
+    $("#tgtVal").textContent = pct(c.target); $("#tgtBar").style.width = pct(c.target);
+    $("#cmdVal").textContent = pct(c.command); $("#cmdBar").style.width = pct(c.command);
+    $("#limitMark").style.left = pct(c.max_close);
+    renderScene(c, S.actions.light);
+    renderToggles();
     renderLog();
 
-    // демо-кнопки
     const isMock = src.kind === "mock" && connected;
-    $("#demoStripMain").hidden = !isMock;
-    renderDemoButtons(n, live);
+    $("#demoStrip").hidden = !isMock;
+    document.body.classList.toggle("demo", isMock);
 
-    // статус источника
+    // сигналы
+    if (S.mode !== "none") {
+      chart.labels = chans.map((_, i) => `S${i + 1} · ${fname(map[i] || "")}`);
+      chart.push(performance.now() / 1000, chans.map((x) => x.raw), chans.map((x) => (x.filtered ?? x.bit)));
+    }
+    renderChannelTable(chans, map);
+    renderSignalsToolbar();
+
+    // настройки
     $("#srcDot").className = "dot" + (connected ? " ok" : src.kind ? " wait" : "");
     $("#srcName").textContent = connected ? (src.name || "Подключено") : "Не подключено";
     $("#srcMsg").textContent = src.message || "";
     $("#disconnectBtn").disabled = !src.kind;
-
-    // отладка
     $("#dbgRate").textContent = S.stats.rate;
     $("#dbgTotal").textContent = `${S.stats.total} / ${S.stats.unparsed}`;
-    $("#dbgFormat").textContent = S.stats.format || "—";
+    $("#dbgFormat").textContent = `${S.mode} · ${S.stats.format || "—"}`;
     $("#dbgRaw").textContent = S.stats.last_raw || "—";
     $("#dbgN").textContent = n;
-
-    renderFingerMap(n, map);
-    renderBindings(n, mapN, live);
+    renderFingerMap(Math.max(n, 5), map);
+    renderBindings(n, map);
     const deb = $("#debounce");
     if (document.activeElement !== deb) deb.value = S.debounce_ms;
+  }
+
+  function renderBendBars(chans, map) {
+    const box = $("#bendBars");
+    if (box.children.length !== chans.length) {
+      box.innerHTML = chans.map((_, i) => `<div class="bend-row"><span></span><div class="bar"><div class="fill"></div></div><b></b></div>`).join("");
+    }
+    chans.forEach((ch, i) => {
+      const row = box.children[i];
+      row.children[0].textContent = `${i + 1} · ${fname(map[i] || "")}`;
+      row.querySelector(".fill").style.width = pct(ch.stale ? 0 : ch.bend);
+      row.children[2].textContent = ch.stale ? "—" : pct(ch.bend);
+    });
+  }
+
+  function renderScene(c, light) {
+    const scene = $("#scene");
+    const gapMax = 100, sampleW = 36;
+    const gap = gapMax * (1 - c.command);
+    const vis = Math.max(gap, sampleW);
+    const grabbed = gap <= sampleW + 2;
+    $("#jawL").setAttribute("transform", `translate(${180 - vis / 2} 0)`);
+    $("#jawR").setAttribute("transform", `translate(${180 + vis / 2} 0)`);
+    scene.classList.toggle("grabbed", grabbed);
+    scene.classList.toggle("light-on", !!light);
+    $("#sceneStatus").textContent = grabbed ? "Образец захвачен" : (c.state === "active" ? "Захват следует за рукой" : STATE_TEXT[c.state]);
+  }
+
+  function renderToggles() {
+    const box = $("#toggles");
+    const comboOf = {};
+    for (const [combo, a] of Object.entries(S.bindings)) comboOf[a] = combo;
+    if (!box.children.length && META.actions.length) {
+      box.innerHTML = META.actions.map((a) => `<button class="toggle" data-action="${a.id}" title="${a.hint}">
+        <span class="t-title">${a.title}</span><span class="t-bind"></span><span class="t-state"></span></button>`).join("");
+    }
+    $$("#toggles .toggle").forEach((b) => {
+      const id = b.dataset.action, on = !!S.actions[id], a = act(id);
+      b.classList.toggle("on", on);
+      b.querySelector(".t-state").textContent = on ? a.on_label : a.off_label;
+      const html = comboOf[id] ? `<span class="chip">${comboOf[id]}</span>` : `<span class="chip none">нет жеста</span>`;
+      const tb = b.querySelector(".t-bind"); if (tb.innerHTML !== html) tb.innerHTML = html;
+    });
   }
 
   function renderLog() {
     const ev = S.events || [];
     const newest = ev.length ? ev[0].ts : 0;
     if (newest === lastEventTs && $("#eventLog").children.length) return;
-    if (newest > lastEventTs && lastEventTs !== 0 && ev[0]) {
-      const card = document.querySelector(`.action[data-action="${ev[0].action}"]`);
-      if (card) { card.classList.remove("flash"); void card.offsetWidth; card.classList.add("flash"); }
+    if (lastEventTs && newest > lastEventTs && ev[0].action) {
+      const b = document.querySelector(`.toggle[data-action="${ev[0].action}"]`);
+      if (b) { b.classList.remove("flash"); void b.offsetWidth; b.classList.add("flash"); }
     }
     lastEventTs = newest;
-    $("#eventLog").innerHTML = ev.length
-      ? ev.map((e) => {
-          const t = new Date(e.ts * 1000).toLocaleTimeString("ru-RU");
-          const how = e.source === "gesture" ? `жест <span class="chip">${e.combo}</span>` : "вручную";
-          return `<li><span class="time">${t}</span><span><b>${e.title}</b> — ${e.label.toLowerCase()} · ${how}</span></li>`;
-        }).join("")
-      : `<li class="muted">Пока ничего не произошло</li>`;
+    $("#eventLog").innerHTML = ev.length ? ev.map((e) => {
+      const t = new Date(e.ts * 1000).toLocaleTimeString("ru-RU");
+      const how = e.source === "gesture" ? ` · жест <span class="chip">${e.combo}</span>` : e.source === "manual" ? " · вручную" : "";
+      return `<li class="${e.source === "system" ? "sys" : ""}"><span class="time">${t}</span><span>${e.text}${how}</span></li>`;
+    }).join("") : `<li class="muted">Пока ничего не произошло</li>`;
   }
 
-  function renderDemoButtons(n, live) {
-    const key = n + "|" + live;
-    $$("[data-demo-buttons]").forEach((box) => {
-      if (box.dataset.key === key) return;
-      box.dataset.key = key;
-      box.innerHTML = combosFor(n).map((c) => `<button data-bits="${c}" class="${c === live ? "active" : ""}">${c}</button>`).join("");
+  function renderChannelTable(chans, map) {
+    const key = chans.length + "|" + map.join();
+    if (key !== tableKey) {
+      tableKey = key;
+      $("#chBody").innerHTML = chans.map((_, i) => `<tr><td><span class="swatch" style="background:${CHANNEL_COLORS[i]}"></span>S${i + 1}</td>
+        <td>${fname(map[i] || "")}</td><td></td><td></td><td></td><td></td><td></td><td></td></tr>`).join("");
+    }
+    const rows = $("#chBody").children;
+    chans.forEach((ch, i) => {
+      const td = rows[i].children;
+      td[2].textContent = ch.raw ?? "—";
+      td[3].textContent = ch.filtered ?? "—";
+      td[4].textContent = ch.stale ? "—" : pct(ch.bend);
+      td[5].textContent = ch.bit;
+      const mode = ch.stale ? "stale" : ch.mode;
+      const html = `<span class="pill ${mode}">${ch.stale ? "нет данных" : MODE_TEXT[ch.mode] || ch.mode}</span>`;
+      if (td[6].innerHTML !== html) td[6].innerHTML = html;
+      td[7].textContent = ch.cal.open != null || ch.cal.fist != null
+        ? `${ch.cal.open != null ? Math.round(ch.cal.open) : "—"} / ${ch.cal.fist != null ? Math.round(ch.cal.fist) : "—"}` : "—";
     });
+    const auto = chans.some((c) => c.mode === "uncalibrated" && !c.stale);
+    $("#sigHint").textContent = S.mode === "values"
+      ? (auto ? "Каналы без калибровки: держите ладонь раскрытой при подключении, затем согните пальцы — включится автокалибровка. Точнее — кнопки «Ладонь раскрыта» и «Кулак сжат»." : "")
+      : S.mode === "bits" ? "Перчатка присылает готовые биты 0/1 — графики показывают только состояния." : "";
+  }
+
+  function renderSignalsToolbar() {
+    const r = S.recording;
+    const btn = $("#recBtn");
+    btn.textContent = r.active ? "■ Остановить запись" : "● Начать запись";
+    btn.classList.toggle("rec-on", r.active);
+    $("#recStatus").textContent = r.active ? `${r.file} · строк: ${r.rows}` : (r.file ? `последняя: ${r.file}` : "");
+    const calOk = S.mode === "values";
+    $("#calOpen").disabled = $("#calFist").disabled = !calOk || !!S.calibrating;
+    $("#calStatus").textContent = S.calibrating
+      ? `Замер «${S.calibrating === "open" ? "ладонь" : "кулак"}»… держите руку неподвижно`
+      : S.last_calibration ? `Откалибровано каналов: ${S.last_calibration.valid_channels} из ${S.n_channels}` : (calOk ? "" : "нужен поток значений АЦП");
   }
 
   function renderFingerMap(n, map) {
-    const key = n + "|" + map.join(",");
-    if (key === renderedMapKey) return;
-    renderedMapKey = key;
-    const opts = (sel) => META.fingers.map((f) => `<option value="${f}" ${f === sel ? "selected" : ""}>${fingerName(f)}</option>`).join("");
-    let html = "";
-    for (let i = 0; i < n; i++) html += `<label>Канал ${i + 1} (${i + 1}-я цифра)<select data-ch="${i}">${opts(map[i])}</select></label>`;
-    $("#fingerMap").innerHTML = html;
+    const key = n + "|" + map.join();
+    if (key === mapKey) return;
+    mapKey = key;
+    const opts = (sel) => META.fingers.map((f) => `<option value="${f}" ${f === sel ? "selected" : ""}>${fname(f)}</option>`).join("");
+    $("#fingerMap").innerHTML = Array.from({ length: n }, (_, i) =>
+      `<label><span><span class="swatch" style="background:${CHANNEL_COLORS[i]}"></span>Канал S${i + 1}</span><select data-ch="${i}">${opts(map[i])}</select></label>`).join("");
   }
 
-  function renderBindings(n, mapN, live) {
-    const key = JSON.stringify([n, mapN, S.bindings, META.actions.length]);
-    if (key !== renderedBindKey) {
-      renderedBindKey = key;
-      const opts = (sel) => `<option value="">— не привязано —</option>` +
+  function renderBindings(n, map) {
+    const key = JSON.stringify([n, map, S.bindings, META.actions.length]);
+    if (key !== bindKey) {
+      bindKey = key;
+      const opts = (sel) => `<option value="">— нет команды —</option>` +
         META.actions.map((a) => `<option value="${a.id}" ${a.id === sel ? "selected" : ""}>${a.title}</option>`).join("");
-      $("#bindBody").innerHTML = combosFor(n).map((c) => {
+      const grid = $("#bindGrid");
+      grid.innerHTML = n ? combosFor(n).map((c) => {
         const rest = !c.includes("1");
-        const cell = rest
-          ? `<span class="muted">состояние покоя — не привязывается</span>`
-          : `<select data-combo="${c}">${opts(S.bindings[c])}</select>`;
-        return `<tr data-row="${c}"><td>${c}</td><td>${bentFingers(c, mapN)}</td><td>${cell}</td></tr>`;
-      }).join("");
+        return `<div class="bind-card ${S.bindings[c] ? "bound" : ""}" data-combo="${c}"><svg></svg>
+          <div class="bc-combo">${c}</div><div class="small muted">${bentNames(c, map)}</div>
+          ${rest ? `<div class="bc-rest">покой — без команды</div>` : `<select data-combo="${c}">${opts(S.bindings[c])}</select>`}</div>`;
+      }).join("") : `<p class="muted">Подключите перчатку или демо — появятся все комбинации для числа каналов.</p>`;
+      $$("#bindGrid .bind-card").forEach((card) => {
+        const hv = new HandView(card.querySelector("svg"), { static: true });
+        hv.set(bendsByFinger([...card.dataset.combo].map(Number), map));
+      });
     }
-    $$("#bindBody tr").forEach((tr) => tr.classList.toggle("live", tr.dataset.row === live));
+    $$("#bindGrid .bind-card").forEach((c) => c.classList.toggle("live", c.dataset.combo === S.committed));
+  }
+
+  // ---------------- демо ----------------
+  function demoBits() { return (S.channels || []).map((c) => (c.bend >= 0.5 ? "1" : "0")).join(""); }
+  function demoToggleFinger(finger) {
+    if (!S || S.source.kind !== "mock") return;
+    const i = S.finger_map.indexOf(finger);
+    if (i < 0 || i >= S.n_channels) return;
+    const bits = [...demoBits()];
+    bits[i] = bits[i] === "1" ? "0" : "1";
+    api("/api/mock", { method: "POST", body: { bits: bits.join("") } }).catch((e) => toast(e.message, true));
+    $("#mockAuto").checked = false;
   }
 
   // ---------------- обработчики ----------------
   document.addEventListener("click", async (e) => {
-    const b = e.target.closest("[data-bits]");
-    if (b) { try { await api("/api/mock", { method: "POST", body: { bits: b.dataset.bits } }); $("#mockAuto").checked = false; } catch (err) { toast(err.message, true); } return; }
-    const card = e.target.closest(".action");
-    if (card) { try { await api(`/api/actions/${card.dataset.action}/toggle`, { method: "POST" }); } catch (err) { toast(err.message, true); } }
+    const t = e.target.closest(".toggle");
+    if (t) { try { await api(`/api/actions/${t.dataset.action}/toggle`, { method: "POST" }); } catch (err) { toast(err.message, true); } }
   });
 
   document.addEventListener("change", async (e) => {
@@ -208,54 +276,68 @@
     try {
       if (t.matches("select[data-combo]")) {
         await api("/api/bindings", { method: "POST", body: { combo: t.dataset.combo, action_id: t.value || null } });
-        toast(t.value ? `Жест ${t.dataset.combo} → ${actionTitle(t.value)}` : `Привязка ${t.dataset.combo} снята`);
+        toast(t.value ? `Жест ${t.dataset.combo} → ${act(t.value).title}` : `Привязка ${t.dataset.combo} снята`);
       } else if (t.matches("select[data-ch]")) {
-        const map = [...(S.finger_map_full || [])];
+        const map = [...S.finger_map];
         map[+t.dataset.ch] = t.value;
         await api("/api/settings", { method: "POST", body: { finger_map: map } });
       } else if (t.id === "debounce") {
         await api("/api/settings", { method: "POST", body: { debounce_ms: +t.value } });
-        toast(`Удержание: ${t.value} мс`);
       } else if (t.id === "mockAuto") {
         await api("/api/mock", { method: "POST", body: { auto: t.checked } });
       } else if (t.id === "bleOnlyNamed") {
         renderBle();
+      } else if (t.id === "showRaw") {
+        chart.showRaw = t.checked;
+      } else if (t.id === "chartSpan") {
+        chart.span = +t.value;
+      } else if (t.id === "replayFile" && t.files.length) {
+        const f = t.files[0];
+        await api("/api/connect", { method: "POST", body: { kind: "replay", text: await f.text(), name: f.name } });
+        chart.clear(); toast(`Воспроизведение: ${f.name}`); t.value = "";
+      } else if (t.id === "recList") {
+        $("#recDownload").hidden = !t.value;
+        $("#recDownload").href = t.value ? `/api/recordings/${encodeURIComponent(t.value)}` : "#";
       }
     } catch (err) { toast(err.message, true); }
   });
 
+  $("#gripSlider").addEventListener("input", (e) => {
+    const v = +e.target.value / 100;
+    api("/api/mock", { method: "POST", body: { bends: Array(S.n_channels || 5).fill(v) } }).catch(() => {});
+    $("#mockAuto").checked = false;
+  });
+
   $$("#srcKind button").forEach((btn) => btn.addEventListener("click", () => {
-    srcKindUI = btn.dataset.kind;
     $$("#srcKind button").forEach((x) => x.classList.toggle("active", x === btn));
-    $$(".src-panel").forEach((p) => (p.hidden = p.dataset.panel !== srcKindUI));
-    if (srcKindUI === "serial") refreshPorts();
+    $$(".src-panel").forEach((p) => (p.hidden = p.dataset.panel !== btn.dataset.kind));
+    if (btn.dataset.kind === "serial") refreshPorts();
   }));
 
   // BLE
   let bleDevices = [];
   function renderBle() {
-    const onlyNamed = $("#bleOnlyNamed").checked;
-    const list = bleDevices.filter((d) => !onlyNamed || d.name);
+    const list = bleDevices.filter((d) => !$("#bleOnlyNamed").checked || d.name);
     $("#bleList").innerHTML = list.length
       ? list.map((d) => `<li><div><div class="dname">${d.name || "(без имени)"} ${d.is_glove ? '<span class="glove">перчатка</span>' : ""}</div><div class="daddr">${d.address}</div></div>
           <span class="rssi">${d.rssi ?? ""} dBm</span><button class="small" data-ble="${d.address}" data-name="${d.name || ""}">Подключить</button></li>`).join("")
       : `<li class="muted">Ничего не найдено. Проверьте, что перчатка включена и Bluetooth на компьютере включён.</li>`;
   }
   $("#bleScan").addEventListener("click", async (e) => {
-    const btn = e.currentTarget; btn.disabled = true; btn.textContent = "Ищу… (5 с)";
+    const b = e.currentTarget; b.disabled = true; b.textContent = "Ищу… (5 с)";
     try { bleDevices = await api("/api/ble/scan?timeout=5"); renderBle(); }
     catch (err) { toast(err.message, true); }
-    finally { btn.disabled = false; btn.textContent = "Найти устройства"; }
+    finally { b.disabled = false; b.textContent = "Найти устройства"; }
   });
   $("#bleList").addEventListener("click", async (e) => {
     const b = e.target.closest("[data-ble]"); if (!b) return;
     b.disabled = true; b.textContent = "Подключаюсь…";
-    try { await api("/api/connect", { method: "POST", body: { kind: "ble", address: b.dataset.ble, name: b.dataset.name || null } }); toast("Перчатка подключена"); }
+    try { await api("/api/connect", { method: "POST", body: { kind: "ble", address: b.dataset.ble, name: b.dataset.name || null } }); chart.clear(); toast("Перчатка подключена"); }
     catch (err) { toast(err.message, true); }
     finally { b.disabled = false; b.textContent = "Подключить"; }
   });
 
-  // Serial
+  // порт
   async function refreshPorts() {
     try {
       const ports = await api("/api/serial/ports");
@@ -267,34 +349,54 @@
   $("#serialConnect").addEventListener("click", async () => {
     const port = $("#serialPort").value;
     if (!port) return toast("Выберите порт", true);
-    try { await api("/api/connect", { method: "POST", body: { kind: "serial", port, baud: +$("#serialBaud").value } }); toast("Порт открыт"); }
+    try { await api("/api/connect", { method: "POST", body: { kind: "serial", port, baud: +$("#serialBaud").value } }); chart.clear(); toast("Порт открыт"); }
     catch (err) { toast(err.message, true); }
   });
 
-  // Mock
   $("#mockStart").addEventListener("click", async () => {
-    try { await api("/api/connect", { method: "POST", body: { kind: "mock" } }); toast("Демо-режим включён"); }
+    try { await api("/api/connect", { method: "POST", body: { kind: "mock" } }); chart.clear(); toast("Демо-режим включён"); location.hash = "#control"; }
     catch (err) { toast(err.message, true); }
   });
-
-  $("#disconnectBtn").addEventListener("click", async () => { try { await api("/api/disconnect", { method: "POST" }); } catch (err) { toast(err.message, true); } });
+  $("#disconnectBtn").addEventListener("click", () => api("/api/disconnect", { method: "POST" }).catch((e) => toast(e.message, true)));
   $("#resetActions").addEventListener("click", () => api("/api/actions/reset", { method: "POST" }).catch((e) => toast(e.message, true)));
-  $("#clearBindings").addEventListener("click", async () => { try { await api("/api/bindings", { method: "DELETE" }); toast("Привязки удалены"); } catch (err) { toast(err.message, true); } });
+  $("#clearBindings").addEventListener("click", () => api("/api/bindings", { method: "DELETE" }).then(() => toast("Привязки удалены")).catch((e) => toast(e.message, true)));
 
-  // клавиши 0..(2^n − 1) в демо-режиме
+  // калибровка, запись, воспроизведение
+  $("#calOpen").addEventListener("click", () => api("/api/calibration/open", { method: "POST" }).catch((e) => toast(e.message, true)));
+  $("#calFist").addEventListener("click", () => api("/api/calibration/fist", { method: "POST" }).catch((e) => toast(e.message, true)));
+  $("#calReset").addEventListener("click", () => api("/api/calibration", { method: "DELETE" }).catch((e) => toast(e.message, true)));
+  $("#recBtn").addEventListener("click", async () => {
+    try {
+      if (S.recording.active) { const r = await api("/api/recording/stop", { method: "POST" }); toast(`Сохранено: data/recordings/${r.file}`); refreshRecordings(); }
+      else await api("/api/recording/start", { method: "POST" });
+    } catch (err) { toast(err.message, true); }
+  });
+  async function refreshRecordings() {
+    try {
+      const list = await api("/api/recordings");
+      const sel = $("#recList"), cur = sel.value;
+      sel.innerHTML = `<option value="">— записи приложения —</option>` + list.map((f) => `<option ${f.name === cur ? "selected" : ""}>${f.name}</option>`).join("");
+    } catch (e) { /* ignore */ }
+  }
+  $("#recPlay").addEventListener("click", async () => {
+    const name = $("#recList").value;
+    if (!name) return toast("Выберите запись", true);
+    try { await api("/api/connect", { method: "POST", body: { kind: "replay", recording: name } }); chart.clear(); toast(`Воспроизведение: ${name}`); }
+    catch (err) { toast(err.message, true); }
+  });
+  $("#chartPause").addEventListener("click", (e) => { chart.paused = !chart.paused; e.target.textContent = chart.paused ? "Продолжить" : "Пауза"; });
+
+  // клавиши 1..5 — согнуть/разогнуть палец канала в демо-режиме
   document.addEventListener("keydown", (e) => {
-    if (!S || S.source.kind !== "mock" || !S.source.connected) return;
-    if (["INPUT", "SELECT", "TEXTAREA"].includes(document.activeElement.tagName)) return;
+    if (!S || S.source.kind !== "mock" || ["INPUT", "SELECT", "TEXTAREA"].includes(document.activeElement.tagName)) return;
     const k = parseInt(e.key, 10);
-    if (Number.isNaN(k) || k >= 2 ** S.n_channels) return;
-    api("/api/mock", { method: "POST", body: { bits: k.toString(2).padStart(S.n_channels, "0") } }).catch(() => {});
-    $("#mockAuto").checked = false;
+    if (k >= 1 && k <= S.n_channels) demoToggleFinger(S.finger_map[k - 1]);
   });
 
   // ---------------- старт ----------------
   (async function init() {
     showTab();
-    try { META = await api("/api/meta"); } catch (e) { /* сервер ещё стартует */ }
+    try { META = await api("/api/meta"); $("#ver").textContent = "v" + META.version; } catch (e) { /* сервер стартует */ }
     connectWS();
   })();
 })();

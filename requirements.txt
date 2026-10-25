@@ -3,3 +3,6 @@ fastapi>=0.110
 uvicorn[standard]>=0.29
 bleak>=0.22
 pyserial>=3.5
+# tray icon on Windows
+pystray>=0.19; sys_platform == "win32"
+pillow>=10; sys_platform == "win32"

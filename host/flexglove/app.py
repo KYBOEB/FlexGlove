@@ -12,22 +12,27 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
+from . import __version__
 from .actions import ACTIONS, catalog
 from .engine import FINGERS, Engine
-from .sources import BleSource, MockSource, SerialSource, Source, list_serial_ports, scan_ble
+from .sources import BleSource, MockSource, ReplaySource, SerialSource, Source, list_serial_ports, scan_ble
 from .storage import Storage
 
 log = logging.getLogger("flexglove")
 WEB_DIR = Path(__file__).parent / "web"
-DEFAULT_DB = Path(__file__).resolve().parents[2] / "data" / "flexglove.db"
+DATA_DIR = Path(__file__).resolve().parents[2] / "data"
+DEFAULT_DB = DATA_DIR / "flexglove.db"
 
 
 class ConnectRequest(BaseModel):
-    kind: Literal["ble", "serial", "mock"]
+    kind: Literal["ble", "serial", "mock", "replay"]
     address: str | None = None
     name: str | None = None
     port: str | None = None
     baud: int = 115200
+    text: str | None = Field(default=None, max_length=50_000_000)   # содержимое CSV для replay
+    recording: str | None = None                                     # или имя файла из data/recordings
+    loop: bool = True
 
 
 class BindingRequest(BaseModel):
@@ -42,13 +47,15 @@ class SettingsRequest(BaseModel):
 
 class MockRequest(BaseModel):
     bits: str | None = Field(default=None, pattern=r"^[01]{1,8}$")
+    bends: list[float] | None = None
     auto: bool | None = None
 
 
 class AppState:
     def __init__(self, db_path: Path | str):
         self.storage = Storage(db_path)
-        self.engine = Engine(self.storage)
+        data_dir = Path(db_path).parent if str(db_path) != ":memory:" else DATA_DIR
+        self.engine = Engine(self.storage, data_dir)
         self.source: Source | None = None
         self.lock = asyncio.Lock()
 
@@ -64,11 +71,24 @@ class AppState:
             await self.disconnect()
             on_raw, on_status = self.engine.on_raw, self.engine.on_source_status
             if req.kind == "mock":
-                src: Source = MockSource(on_raw, on_status, n_channels=self.engine.n_channels or 2)
+                src: Source = MockSource(on_raw, on_status)
             elif req.kind == "serial":
                 if not req.port:
                     raise HTTPException(400, "Не указан порт")
                 src = SerialSource(on_raw, on_status, req.port, req.baud)
+            elif req.kind == "replay":
+                text, name = req.text, req.name or "запись"
+                if req.recording:
+                    path = self.engine.recorder.folder / Path(req.recording).name
+                    if not path.exists():
+                        raise HTTPException(404, "Запись не найдена")
+                    text, name = path.read_text(encoding="utf-8-sig"), path.name
+                if not text:
+                    raise HTTPException(400, "Нет данных для воспроизведения")
+                try:
+                    src = ReplaySource(on_raw, on_status, text, name=name, loop=req.loop)
+                except ValueError as exc:
+                    raise HTTPException(400, str(exc)) from exc
             else:
                 if not req.address:
                     raise HTTPException(400, "Не указан адрес BLE-устройства")
@@ -88,15 +108,16 @@ class AppState:
 
 def create_app(db_path: Path | str = DEFAULT_DB, demo: bool = False) -> FastAPI:
     state = AppState(db_path)
+    engine = state.engine
 
     @asynccontextmanager
     async def lifespan(_app: FastAPI):
-        state.engine.start()
+        engine.start()
         if demo:
             await state.connect(ConnectRequest(kind="mock"))
         yield
         await state.disconnect()
-        await state.engine.stop()
+        await engine.stop()
         state.storage.close()
 
     app = FastAPI(title="FlexGlove host", lifespan=lifespan)
@@ -105,18 +126,22 @@ def create_app(db_path: Path | str = DEFAULT_DB, demo: bool = False) -> FastAPI:
     # ---------- статика ----------
     @app.get("/")
     async def index():
-        return FileResponse(WEB_DIR / "index.html")
+        return FileResponse(WEB_DIR / "index.html", headers={"Cache-Control": "no-store"})
 
     app.mount("/static", StaticFiles(directory=WEB_DIR), name="static")
 
-    # ---------- состояние и справочники ----------
+    # ---------- служебное ----------
+    @app.get("/api/ping")
+    async def ping():
+        return {"app": "flexglove", "version": __version__}
+
     @app.get("/api/state")
     async def get_state():
-        return state.engine.snapshot()
+        return engine.snapshot()
 
     @app.get("/api/meta")
     async def meta():
-        return {"actions": catalog(), "fingers": FINGERS}
+        return {"actions": catalog(), "fingers": FINGERS, "version": __version__}
 
     # ---------- подключение ----------
     @app.get("/api/ble/scan")
@@ -124,7 +149,7 @@ def create_app(db_path: Path | str = DEFAULT_DB, demo: bool = False) -> FastAPI:
         try:
             return await scan_ble(timeout)
         except Exception as exc:  # noqa: BLE001
-            raise HTTPException(502, f"Поиск BLE не удался: {exc}. Проверьте, что Bluetooth включён и у Терминала/IDE есть доступ к Bluetooth.") from exc
+            raise HTTPException(502, f"Поиск BLE не удался: {exc}. Проверьте, что Bluetooth включён.") from exc
 
     @app.get("/api/serial/ports")
     async def serial_ports():
@@ -133,13 +158,13 @@ def create_app(db_path: Path | str = DEFAULT_DB, demo: bool = False) -> FastAPI:
     @app.post("/api/connect")
     async def connect(req: ConnectRequest):
         await state.connect(req)
-        return state.engine.snapshot()["source"]
+        return engine.snapshot()["source"]
 
     @app.post("/api/disconnect")
     async def disconnect():
         async with state.lock:
             await state.disconnect()
-        return state.engine.snapshot()["source"]
+        return engine.snapshot()["source"]
 
     @app.post("/api/mock")
     async def mock(req: MockRequest):
@@ -147,9 +172,45 @@ def create_app(db_path: Path | str = DEFAULT_DB, demo: bool = False) -> FastAPI:
             raise HTTPException(409, "Демо-режим не включён")
         if req.bits is not None:
             state.source.set_bits(req.bits)
+        if req.bends is not None:
+            state.source.set_bends(req.bends)
         if req.auto is not None:
             state.source.set_auto(req.auto)
         return {"bits": state.source.bits, "auto": state.source.auto}
+
+    # ---------- калибровка ----------
+    @app.post("/api/calibration/{target}")
+    async def calibrate(target: Literal["open", "fist"]):
+        try:
+            engine.start_calibration(target)
+        except (RuntimeError, ValueError) as exc:
+            raise HTTPException(409, str(exc)) from exc
+        return {"started": target}
+
+    @app.delete("/api/calibration")
+    async def reset_calibration():
+        engine.reset_calibration()
+        return {}
+
+    # ---------- запись ----------
+    @app.post("/api/recording/start")
+    async def rec_start():
+        return {"file": engine.start_recording()}
+
+    @app.post("/api/recording/stop")
+    async def rec_stop():
+        return {"file": engine.stop_recording()}
+
+    @app.get("/api/recordings")
+    async def recordings():
+        return engine.recorder.list()
+
+    @app.get("/api/recordings/{name}")
+    async def recording_file(name: str):
+        path = engine.recorder.folder / Path(name).name
+        if not path.exists():
+            raise HTTPException(404, "Запись не найдена")
+        return FileResponse(path, filename=path.name, media_type="text/csv")
 
     # ---------- привязки и настройки ----------
     @app.post("/api/bindings")
@@ -158,46 +219,46 @@ def create_app(db_path: Path | str = DEFAULT_DB, demo: bool = False) -> FastAPI:
             raise HTTPException(400, "Неизвестное действие")
         if req.action_id is not None and set(req.combo) == {"0"}:
             raise HTTPException(400, "Комбинация «все пальцы разогнуты» — состояние покоя, её нельзя привязать")
-        state.engine.set_binding(req.combo, req.action_id)
+        engine.set_binding(req.combo, req.action_id)
         return state.storage.bindings()
 
     @app.delete("/api/bindings")
     async def clear_bindings():
         state.storage.clear_bindings()
-        state.engine._dirty = True  # noqa: SLF001
+        engine.set_settings()
         return {}
 
     @app.post("/api/settings")
     async def settings(req: SettingsRequest):
         if req.finger_map is not None and any(f not in FINGERS for f in req.finger_map):
             raise HTTPException(400, "Неизвестный палец")
-        state.engine.set_settings(req.finger_map, req.debounce_ms)
-        return {"finger_map": state.engine.finger_map, "debounce_ms": state.engine.debounce_ms}
+        engine.set_settings(req.finger_map, req.debounce_ms)
+        return {"finger_map": engine.finger_map, "debounce_ms": engine.debounce_ms}
 
     @app.post("/api/actions/{action_id}/toggle")
     async def toggle(action_id: str):
         if action_id not in ACTIONS:
             raise HTTPException(404, "Неизвестное действие")
-        state.engine.toggle_action(action_id, source="manual")
-        return state.engine.action_state
+        engine.toggle_action(action_id, source="manual")
+        return engine.action_state()
 
     @app.post("/api/actions/reset")
     async def reset():
-        state.engine.reset_actions()
-        return state.engine.action_state
+        engine.reset_actions()
+        return engine.action_state()
 
     # ---------- живое состояние ----------
     @app.websocket("/ws")
     async def ws(websocket: WebSocket):
         await websocket.accept()
-        q = state.engine.subscribe()
-        await websocket.send_json(state.engine.snapshot())
+        q = engine.subscribe()
+        await websocket.send_json(engine.snapshot())
         try:
             while True:
                 await websocket.send_json(await q.get())
         except (WebSocketDisconnect, RuntimeError):
             pass
         finally:
-            state.engine.unsubscribe(q)
+            engine.unsubscribe(q)
 
     return app

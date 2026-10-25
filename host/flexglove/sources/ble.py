@@ -52,8 +52,10 @@ class BleSource(Source):
     def _on_disconnect(self, _client: BleakClient) -> None:
         self.on_status(kind=self.kind, name=self.name, connected=False, message="Устройство отключилось")
 
-    def _notify(self, _char, data: bytearray) -> None:
-        self.on_raw(bytes(data))
+    def _make_notify(self, tag: int | None):
+        def _notify(_char, data: bytearray) -> None:
+            self.on_raw(bytes(data), tag=tag)
+        return _notify
 
     async def start(self) -> None:
         self.on_status(kind=self.kind, name=self.name, connected=False, message=f"Подключаюсь к {self.name}…")
@@ -77,8 +79,11 @@ class BleSource(Source):
                 continue
             break  # нашли DATA протокола v0.1
 
-        for char in notify_chars:
-            await self.client.start_notify(char, self._notify)
+        # Несколько notify-характеристик = у каждого сенсора своя: номер канала — по порядку handle.
+        notify_chars.sort(key=lambda c: c.handle)
+        many = len(notify_chars) > 1
+        for i, char in enumerate(notify_chars):
+            await self.client.start_notify(char, self._make_notify(i if many else None))
             self.subscribed.append(char.uuid)
 
         if notify_chars:
@@ -94,7 +99,7 @@ class BleSource(Source):
         while self.client and self.client.is_connected:
             for char in chars:
                 try:
-                    self.on_raw(bytes(await self.client.read_gatt_char(char)))
+                    self.on_raw(bytes(await self.client.read_gatt_char(char)), tag=chars.index(char) if len(chars) > 1 else None)
                 except Exception:  # noqa: BLE001 - устройство могло отключиться
                     pass
             await asyncio.sleep(0.1)
