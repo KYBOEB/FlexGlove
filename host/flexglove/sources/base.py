@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any, Callable
 
-RawCallback = Callable[[bytes | bytearray | str], None]
+RawCallback = Callable[..., None]  # on_raw(data, tag=None)
 StatusCallback = Callable[..., Any]
 
 

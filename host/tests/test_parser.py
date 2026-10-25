@@ -5,43 +5,60 @@ import pytest
 from flexglove.parser import parse_message
 
 
-@pytest.mark.parametrize("msg, combo", [
-    (b"01", "01"), (b"10\n", "10"), (b"1 1\r\n", "11"), (b"0,0", "00"),
-    (b"[1,0]", "10"), ("bits=01", "01"), (b"11111", "11111"),
+# ---------- значения АЦП (основной формат) ----------
+@pytest.mark.parametrize("msg, values", [
+    (b"213", (213,)), (b"213\r\n", (213,)), (b"213.0", (213,)),
+    (b"213;215;210;220;218", (213, 215, 210, 220, 218)),
+    (b"213,215,210,220,218\n", (213, 215, 210, 220, 218)),
+    (b"213 215\t210", (213, 215, 210)), (b"adc: 213", (213,)),
 ])
-def test_text_bits(msg, combo):
-    frames = parse_message(msg)
-    assert len(frames) == 1 and frames[0].combo == combo
+def test_text_values(msg, values):
+    (f,) = parse_message(msg)
+    assert f.kind == "values" and f.values == tuple(float(v) for v in values)
 
 
-def test_four_single_bits_are_not_csv():
-    assert parse_message(b"1,0,1,0")[0].combo == "1010"
+def test_binary_uint16_values():
+    (f,) = parse_message(struct.pack("<5H", 213, 900, 210, 220, 218))
+    assert f.kind == "values" and f.values == (213, 900, 210, 220, 218)
 
 
-def test_text_int_mask_bit0_is_channel1():
-    assert parse_message(b"2")[0].combo == "01"
-    assert parse_message(b"3")[0].combo == "11"
-
-
-def test_single_raw_byte():
-    assert parse_message(bytes([1]))[0].combo == "10"
-
-
-def test_several_lines_in_one_message():
-    assert [f.combo for f in parse_message(b"00\n01\n11\n")] == ["00", "01", "11"]
-
-
-def test_csv_v01():
-    f = parse_message(b"17,12345,5,1200,2100,900\n")[0]
-    assert f.fmt == "v0.1-csv" and f.combo == "101" and f.values == (1200, 2100, 900) and f.seq == 17
+def test_binary_single_uint16_and_int32():
+    assert parse_message(struct.pack("<H", 213))[0].values == (213,)
+    assert parse_message(struct.pack("<i", 213))[0].values == (213,)
 
 
 def test_binary_v01():
     pkt = struct.pack("<BBHIB", 1, 2, 7, 1000, 0b10) + struct.pack("<2H", 1500, 2500)
-    f = parse_message(pkt)[0]
-    assert f.fmt == "v0.1-bin" and f.combo == "01" and f.values == (1500, 2500) and f.t_ms == 1000
+    (f,) = parse_message(pkt)
+    assert f.fmt == "v0.1-bin" and f.values == (1500, 2500) and f.combo == "01" and f.t_ms == 1000
 
 
-@pytest.mark.parametrize("msg", [b"", b"hello", b"\n\n", b"999"])
+# ---------- метки каналов ----------
+@pytest.mark.parametrize("msg, tags", [
+    (b"S1:213", {1: 213}), (b"ch2=215", {2: 215}), (b"A0: 210", {0: 210}), (b"3:220", {3: 220}),
+    (b"S1:213 S2:215", {1: 213, 2: 215}),
+])
+def test_tagged(msg, tags):
+    (f,) = parse_message(msg)
+    assert f.kind == "tagged" and f.tags == {k: float(v) for k, v in tags.items()}
+
+
+# ---------- биты (совместимость с этапом 0) ----------
+@pytest.mark.parametrize("msg, combo", [(b"01", "01"), (b"1 0", "10"), (b"[1,0]", "10"), ("bits=01", "01"), (b"11111", "11111")])
+def test_bits(msg, combo):
+    (f,) = parse_message(msg)
+    assert f.kind == "bits" and f.combo == combo
+
+
+def test_ambiguous_01_becomes_values_when_stream_is_values():
+    assert parse_message(b"1", prefer_values=True)[0].kind == "values"
+    assert parse_message(b"10", prefer_values=True)[0].values == (10,)
+
+
+def test_single_byte_mask():
+    assert parse_message(bytes([1]))[0].combo == "10"
+
+
+@pytest.mark.parametrize("msg", [b"", b"hello", b"\n\n", b"# debug ch1=213", b"1;2;3;4;5;6;7;8;9"])
 def test_garbage(msg):
     assert parse_message(msg) == []
