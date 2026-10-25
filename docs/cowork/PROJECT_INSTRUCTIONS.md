@@ -19,7 +19,8 @@
 - `docs/decisions.md` — принятые решения (не пересматривать без явного запроса);
 - `docs/protocol.md` — формат обмена ESP32 ↔ ПК (контракт с прошивкой);
 - `docs/architecture.md` — модули и их ответственность;
-- `docs/background/*.docx` — концепция проекта и исходные описания.
+- `docs/background/*.docx` — концепция (актуальная — `FlexGlove_koncepciya_v0.3_teleupravlenie.docx`), аналитика и исходные описания;
+- `docs/analysis/` — разбор реальных данных с ESP32.
 
 ## Как устроена работа
 - Один чат = один этап (или крупная задача). Чат начинается с промпта из `docs/cowork/STAGE_KICKOFF.md`.
