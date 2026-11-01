@@ -33,7 +33,17 @@
     <div class="control-grid">
       <div class="card hand-card">
         <h2>Рука оператора</h2>
-        <div class="hand-wrap"><svg id="handMain" class="hand"></svg></div>
+        <div class="hand3d" id="hand3d" hidden></div>
+        <div class="hand-wrap" id="hand2d"><svg id="handMain" class="hand"></svg></div>
+        <div class="imu-box" id="imuBox" hidden>
+          <div class="imu-angles"><span>крен <b id="imuRoll">0°</b></span><span>тангаж <b id="imuPitch">0°</b></span><span>рысканье <b id="imuYaw">0°</b></span></div>
+          <div class="row">
+            <button class="small" id="imuZero" title="Текущая поза руки станет исходной (на экране — пальцы вверх)">Обнулить положение</button>
+            <button class="ghost small" id="imuCal" title="2 с замера смещения гироскопа — держите руку неподвижно">Калибровать гироскоп</button>
+          </div>
+          <div class="small" id="imuStatus"></div>
+          <div class="small muted" id="imuDrift"></div>
+        </div>
         <div class="combo-row">
           <div><span class="muted small">Комбинация</span><div class="combo" id="mainCombo">—</div></div>
           <div class="gesture-target" id="mainTarget"></div>
@@ -64,6 +74,13 @@
           </g>
           <text id="sceneStatus" x="16" y="26" class="sc-status"></text>
           <text id="sceneCam" x="344" y="26" class="sc-cam">CAM 1 ● REC</text>
+          <g id="rotDial" transform="translate(318 66)">
+            <circle class="rd-ring" r="24"/>
+            <path class="rd-range" d="M -24 0 A 24 24 0 0 1 24 0"/>
+            <line class="rd-target" id="rdTarget" x1="0" y1="0" x2="0" y2="-24"/>
+            <g id="rdJaws"><rect class="rd-jaw" x="-11" y="-4" width="5" height="8" rx="1.5"/><rect class="rd-jaw" x="6" y="-4" width="5" height="8" rx="1.5"/><rect class="rd-body" x="-6" y="-2" width="12" height="4" rx="1"/></g>
+            <text class="rd-label" id="rdLabel" y="38">поворот 0°</text>
+          </g>
         </svg>
       </div>
 
@@ -77,6 +94,9 @@
         <div class="meter">
           <div class="meter-label"><span>Команда захвату</span><b id="cmdVal">0%</b></div>
           <div class="bar"><div class="fill cmd" id="cmdBar"></div><div class="limit" id="limitMark" title="ограничение сжатия"></div></div>
+        </div>
+        <div class="meter" id="rotMeter" hidden>
+          <div class="meter-label"><span>Поворот: кисть → захват</span><b id="rotVal">0° → 0°</b></div>
         </div>
         <div class="toggles" id="toggles"></div>
         <div class="cmd-status" id="cmdStatus">
@@ -93,6 +113,10 @@
       <span class="muted small">щёлкайте по пальцам силуэта или клавиши 1–5 · сжатие кисти:</span>
       <input type="range" id="gripSlider" min="0" max="100" value="0">
       <label class="check"><input type="checkbox" id="mockAuto"> автоперебор</label>
+      <span class="demo-imu" id="demoImu"><span class="muted small">кисть (← → ↑ ↓): крен</span>
+        <input type="range" id="rollSlider" min="-90" max="90" value="0">
+        <span class="muted small">тангаж</span>
+        <input type="range" id="pitchSlider" min="-80" max="80" value="0"></span>
     </div>
 
     <div class="card log-card">
@@ -230,6 +254,11 @@
           исключаются, а команда срабатывает удержанием ≥ 1 с и только если пальцы сжатия при этом неподвижны.</p>
         <div id="fingerMap" class="finger-map"></div>
         <p class="hint warn-text" id="rolesWarn" hidden></p>
+        <div class="row"><span>Рука</span>
+          <select id="handSide"><option value="right">правая</option><option value="left">левая</option></select></div>
+        <div class="row"><span>MPU6050 закреплён</span><select id="imuMount"></select></div>
+        <p class="hint">Оси руки: X — к пальцам, Z — от тыльной стороны кисти. Выберите, куда смотрит ось X модуля
+          (стрелка на плате) и какой стороной он приклеен; по умолчанию X — к пальцам, лицом от кожи.</p>
         <label class="row">Удержание жеста перед срабатыванием (управление не активно), мс <input type="number" id="debounce" min="0" max="2000" step="50"></label>
       </div>
 
@@ -257,5 +286,6 @@
 <script src="/static/hand.js"></script>
 <script src="/static/chart.js"></script>
 <script src="/static/app.js"></script>
+<script type="module" src="/static/hand3d.js"></script>
 </body>
 </html>
