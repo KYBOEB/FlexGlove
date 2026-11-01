@@ -14,6 +14,8 @@ from pydantic import BaseModel, Field
 
 from . import __version__
 from .actions import ACTIONS, catalog
+from .dsp import presets as dsp_presets
+from .dsp.filters import FILTERS
 from .engine import FINGERS, Engine
 from .sources import BleSource, MockSource, ReplaySource, SerialSource, Source, list_serial_ports, scan_ble
 from .storage import Storage
@@ -33,6 +35,7 @@ class ConnectRequest(BaseModel):
     text: str | None = Field(default=None, max_length=50_000_000)   # содержимое CSV для replay
     recording: str | None = None                                     # или имя файла из data/recordings
     loop: bool = True
+    n_channels: int = Field(default=5, ge=1, le=8)                   # число сенсоров в демо-режиме
 
 
 class BindingRequest(BaseModel):
@@ -40,9 +43,20 @@ class BindingRequest(BaseModel):
     action_id: str | None = None
 
 
+class RoleModel(BaseModel):
+    grip: bool = True      # канал задаёт сжатие захвата
+    cmd: bool = True       # канал участвует в жестах-командах
+
+
 class SettingsRequest(BaseModel):
     finger_map: list[str] | None = None
     debounce_ms: int | None = Field(default=None, ge=0, le=2000)
+    channel_roles: list[RoleModel] | None = Field(default=None, max_length=8)
+
+
+class PipelineRequest(BaseModel):
+    preset: str                                  # basic | one_euro | smooth | custom
+    config: list[dict] | None = Field(default=None, max_length=16)   # для custom
 
 
 class MockRequest(BaseModel):
@@ -71,7 +85,7 @@ class AppState:
             await self.disconnect()
             on_raw, on_status = self.engine.on_raw, self.engine.on_source_status
             if req.kind == "mock":
-                src: Source = MockSource(on_raw, on_status)
+                src: Source = MockSource(on_raw, on_status, n_channels=req.n_channels)
             elif req.kind == "serial":
                 if not req.port:
                     raise HTTPException(400, "Не указан порт")
@@ -232,8 +246,24 @@ def create_app(db_path: Path | str = DEFAULT_DB, demo: bool = False) -> FastAPI:
     async def settings(req: SettingsRequest):
         if req.finger_map is not None and any(f not in FINGERS for f in req.finger_map):
             raise HTTPException(400, "Неизвестный палец")
-        engine.set_settings(req.finger_map, req.debounce_ms)
-        return {"finger_map": engine.finger_map, "debounce_ms": engine.debounce_ms}
+        roles = [r.model_dump() for r in req.channel_roles] if req.channel_roles is not None else None
+        engine.set_settings(req.finger_map, req.debounce_ms, roles)
+        return {"finger_map": engine.finger_map, "debounce_ms": engine.debounce_ms,
+                "channel_roles": [r.as_dict() for r in engine.roles()]}
+
+    # ---------- фильтрация (dsp) ----------
+    @app.get("/api/pipelines")
+    async def pipelines():
+        return {"presets": dsp_presets.catalog(), "filters": sorted(FILTERS),
+                "current": engine.snapshot()["pipeline"]}
+
+    @app.post("/api/pipeline")
+    async def set_pipeline(req: PipelineRequest):
+        try:
+            engine.set_pipeline(req.preset, req.config)
+        except ValueError as exc:
+            raise HTTPException(400, str(exc)) from exc
+        return engine.snapshot()["pipeline"]
 
     @app.post("/api/actions/{action_id}/toggle")
     async def toggle(action_id: str):

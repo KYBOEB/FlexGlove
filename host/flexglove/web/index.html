@@ -28,6 +28,7 @@
     <div class="banner" id="noDeviceBanner" hidden>
       Перчатка не подключена. <a href="#settings">Подключите её</a> или включите демо-режим.
     </div>
+    <div class="banner warn" id="streamWarn" hidden></div>
 
     <div class="control-grid">
       <div class="card hand-card">
@@ -78,6 +79,10 @@
           <div class="bar"><div class="fill cmd" id="cmdBar"></div><div class="limit" id="limitMark" title="ограничение сжатия"></div></div>
         </div>
         <div class="toggles" id="toggles"></div>
+        <div class="cmd-status" id="cmdStatus">
+          <div class="small" id="cmdText"></div>
+          <div class="bar thin"><div class="fill cmd" id="cmdHoldBar"></div></div>
+        </div>
         <button class="ghost small" id="resetActions">Сбросить пульт</button>
         <p class="note">Аварийная остановка реального оборудования — отдельной аппаратной кнопкой, не через перчатку.</p>
       </div>
@@ -114,6 +119,10 @@
           <button id="recBtn">● Начать запись</button>
           <span class="small" id="recStatus"></span>
         </div>
+        <div class="row">
+          <button class="ghost small" id="protoBtn" title="5 с покой → 5 × (сгиб 2 с / разгиб 2 с) → 5 с покой; подсказки на экране">Запись по протоколу (30 с)</button>
+          <select id="protoCh" title="Какой палец сгибать"></select>
+        </div>
       </div>
       <div class="tool">
         <span class="muted small">Воспроизвести запись</span>
@@ -126,9 +135,27 @@
       </div>
     </div>
 
+    <div class="card pipe-card">
+      <div class="row between">
+        <h2>Фильтрация сигнала</h2>
+        <span class="small muted">график и сгиб считаются по выходу выбранного конвейера</span>
+      </div>
+      <div class="row">
+        <select id="pipePreset"></select>
+        <button class="ghost small" id="pipeApply" hidden>Применить</button>
+        <span class="small" id="pipeHint"></span>
+      </div>
+      <div id="pipeCustom" hidden>
+        <textarea id="pipeJson" rows="4" spellcheck="false"></textarea>
+        <p class="hint">Список блоков по порядку. Фильтры: <span id="pipeTypes"></span>. Пример:
+          <code>[{"type":"hampel","n":7},{"type":"one_euro","min_cutoff":0.7,"beta":0.02}]</code>.
+          Как сравнить конвейеры на записи — <code>python tools/evaluate.py запись.csv --compare one_euro свой.json</code>.</p>
+      </div>
+    </div>
+
     <div class="card">
       <div class="chart-head">
-        <h2>Каналы</h2>
+        <h2>Каналы <span class="pill" id="motionPill">покой</span></h2>
         <div class="row">
           <label class="check"><input type="checkbox" id="showRaw" checked> сырые значения</label>
           <select id="chartSpan"><option value="5">5 с</option><option value="10" selected>10 с</option><option value="30">30 с</option></select>
@@ -170,8 +197,11 @@
           </div>
         </div>
         <div class="src-panel" data-panel="mock" hidden>
-          <p class="hint">Имитация перчатки с 5 сенсорами (сигнал похож на реальный: АЦП ≈ 213 в покое, шум, выбросы, 50 Гц).</p>
-          <button id="mockStart">Включить демо</button>
+          <p class="hint">Имитация перчатки (сигнал похож на реальный: АЦП ≈ 213 в покое, шум, выбросы, 50 Гц).</p>
+          <div class="row">
+            <select id="mockN"><option value="2">2 сенсора — как прототип</option><option value="5" selected>5 сенсоров</option></select>
+            <button id="mockStart">Включить демо</button>
+          </div>
         </div>
         <div class="status-box">
           <div><span class="dot" id="srcDot"></span> <b id="srcName">Не подключено</b></div>
@@ -186,6 +216,8 @@
             <tr><td>Режим · формат</td><td id="dbgFormat">—</td></tr>
             <tr><td>Последнее сообщение</td><td><code id="dbgRaw">—</code></td></tr>
             <tr><td>Каналов</td><td id="dbgN">—</td></tr>
+            <tr><td>IMU (MPU6050)</td><td id="dbgImu">нет данных</td></tr>
+            <tr><td>Предупреждения</td><td id="dbgWarn">нет</td></tr>
           </table>
         </details>
       </div>
@@ -193,13 +225,19 @@
       <div class="card">
         <h2>2. Каналы и пальцы</h2>
         <div class="hand-wrap"><svg id="handSettings" class="hand"></svg></div>
+        <p class="hint">Для каждого канала: какой палец и его роль. <b>Сжатие</b> — палец ведёт захват (среднее сгибов
+          таких пальцев). <b>Команды</b> — палец участвует в жестах. Пока управление активно, пальцы сжатия из жестов
+          исключаются, а команда срабатывает удержанием ≥ 1 с и только если пальцы сжатия при этом неподвижны.</p>
         <div id="fingerMap" class="finger-map"></div>
-        <label class="row">Удержание жеста перед срабатыванием, мс <input type="number" id="debounce" min="0" max="2000" step="50"></label>
+        <p class="hint warn-text" id="rolesWarn" hidden></p>
+        <label class="row">Удержание жеста перед срабатыванием (управление не активно), мс <input type="number" id="debounce" min="0" max="2000" step="50"></label>
       </div>
 
       <div class="card wide">
         <div class="row between"><h2>3. Жесты-команды</h2><button class="ghost small" id="clearBindings">Удалить все привязки</button></div>
-        <p class="hint">Все комбинации положений пальцев (согнут / разогнут). Покажите жест — его карточка подсветится; выберите команду. Одна команда — одна комбинация. «Все разогнуты» — покой, не привязывается.</p>
+        <p class="hint">Все комбинации положений пальцев (согнут / разогнут). Покажите жест — его карточка подсветится; выберите команду. Одна команда — одна комбинация. «Все разогнуты» — покой, не привязывается.
+          Метка «при ARM» показывает, какой жест работает, пока управление активно (там видны только пальцы «чисто команд»;
+          если жесты совпали, выигрывает «Управление захватом», затем «Фиксация»).</p>
         <div class="bind-grid" id="bindGrid"></div>
       </div>
     </div>
@@ -207,6 +245,15 @@
 </main>
 
 <div class="toast" id="toast" hidden></div>
+<div class="proto" id="proto" hidden>
+  <div class="proto-box">
+    <div class="small muted" id="protoStep"></div>
+    <div class="proto-cmd" id="protoCmd"></div>
+    <div class="proto-left" id="protoLeft"></div>
+    <div class="bar"><div class="fill cmd" id="protoBar"></div></div>
+    <button class="ghost small" id="protoCancel">Прервать</button>
+  </div>
+</div>
 <script src="/static/hand.js"></script>
 <script src="/static/chart.js"></script>
 <script src="/static/app.js"></script>
