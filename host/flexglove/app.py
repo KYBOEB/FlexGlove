@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import mimetypes
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Literal
@@ -22,6 +23,9 @@ from .sources import BleSource, MockSource, ReplaySource, SerialSource, Source, 
 from .storage import Storage
 
 log = logging.getLogger("flexglove")
+# На Windows реестр иногда сопоставляет .js с text/plain — тогда браузер откажется загружать ES-модуль
+# (hand3d.js, three.module.min.js). Задаём тип явно.
+mimetypes.add_type("text/javascript", ".js")
 WEB_DIR = Path(__file__).parent / "web"
 DATA_DIR = Path(__file__).resolve().parents[2] / "data"
 DEFAULT_DB = DATA_DIR / "flexglove.db"
