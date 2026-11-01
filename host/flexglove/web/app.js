@@ -114,6 +114,7 @@
     }
     renderChannelTable(chans, map);
     renderSignalsToolbar();
+    renderProtoChannels();
 
     // настройки
     $("#srcDot").className = "dot" + (connected ? " ok" : src.kind ? " wait" : "");
@@ -404,7 +405,7 @@
   });
 
   $("#mockStart").addEventListener("click", async () => {
-    try { await api("/api/connect", { method: "POST", body: { kind: "mock" } }); chart.clear(); toast("Демо-режим включён"); location.hash = "#control"; }
+    try { await api("/api/connect", { method: "POST", body: { kind: "mock", n_channels: +$("#mockN").value } }); chart.clear(); toast("Демо-режим включён"); location.hash = "#control"; }
     catch (err) { toast(err.message, true); }
   });
   $("#disconnectBtn").addEventListener("click", () => api("/api/disconnect", { method: "POST" }).catch((e) => toast(e.message, true)));
@@ -421,6 +422,59 @@
       else await api("/api/recording/start", { method: "POST" });
     } catch (err) { toast(err.message, true); }
   });
+  // запись по протоколу этапа 2: 5 с покой → 5 × (сгиб 2 с / разгиб 2 с) → 5 с покой
+  const PROTO = [["rest", 5]].concat(...Array.from({ length: 5 }, () => [["bend", 2], ["release", 2]]), [["rest", 5]]);
+  let protoTimer = null;
+  function renderProtoChannels() {
+    const sel = $("#protoCh"), n = S ? S.n_channels : 0;
+    const key = n + "|" + (S ? S.finger_map.join() : "");
+    if (sel.dataset.key === key) return;
+    sel.dataset.key = key;
+    sel.innerHTML = Array.from({ length: n }, (_, i) => `<option value="${i}">S${i + 1} · ${fname(S.finger_map[i])}</option>`).join("") +
+      (n > 1 ? `<option value="all">все пальцы вместе</option>` : "");
+  }
+  async function protoStop(save) {
+    clearInterval(protoTimer); protoTimer = null;
+    $("#proto").hidden = true;
+    if (S && S.source.kind === "mock") api("/api/mock", { method: "POST", body: { bends: Array(S.n_channels).fill(0) } }).catch(() => {});
+    if (S && S.recording.active) {
+      const r = await api("/api/recording/stop", { method: "POST" }).catch(() => null);
+      if (r) toast(save ? `Запись по протоколу сохранена: data/recordings/${r.file} — разбор: python tools/analyze_recording.py` : `Запись прервана: ${r.file}`, !save);
+      refreshRecordings();
+    }
+  }
+  $("#protoBtn").addEventListener("click", async () => {
+    if (!S || S.mode !== "values") return toast("Нужен поток значений АЦП (подключите перчатку)", true);
+    if (S.recording.active) return toast("Сначала остановите текущую запись", true);
+    const ch = $("#protoCh").value;
+    const who = ch === "all" ? "все пальцы" : `S${+ch + 1} (${fname(S.finger_map[+ch])})`;
+    try { await api("/api/recording/start", { method: "POST" }); } catch (e) { return toast(e.message, true); }
+    const total = PROTO.reduce((a, [, d]) => a + d, 0), t0 = performance.now();
+    let lastPhase = -1;
+    $("#proto").hidden = false;
+    const tick = () => {
+      const el = (performance.now() - t0) / 1000;
+      if (el >= total) return protoStop(true);
+      let acc = 0, i = 0;
+      while (acc + PROTO[i][1] <= el) acc += PROTO[i++][1];
+      const [kind, dur] = PROTO[i], bendNo = Math.floor((i + 1) / 2);
+      $("#protoStep").textContent = `Запись по протоколу · ${who} · шаг ${i + 1} из ${PROTO.length}`;
+      $("#protoCmd").textContent = kind === "rest" ? "Покой — ладонь раскрыта" : kind === "bend" ? `Согнуть ${who} (${bendNo} из 5)` : "Разогнуть";
+      $("#protoCmd").className = "proto-cmd" + (kind === "bend" ? " bend" : "");
+      $("#protoLeft").textContent = Math.ceil(acc + dur - el);
+      $("#protoBar").style.width = pct(el / total);
+      if (i !== lastPhase && S.source.kind === "mock") {        // в демо пальцы сгибаются сами — проверка без перчатки
+        const b = Array(S.n_channels).fill(0);
+        if (kind === "bend") (ch === "all" ? b.fill(1) : (b[+ch] = 1));
+        api("/api/mock", { method: "POST", body: { bends: b } }).catch(() => {});
+        $("#mockAuto").checked = false;
+      }
+      lastPhase = i;
+    };
+    tick(); protoTimer = setInterval(tick, 100);
+  });
+  $("#protoCancel").addEventListener("click", () => protoStop(false));
+
   async function refreshRecordings() {
     try {
       const list = await api("/api/recordings");

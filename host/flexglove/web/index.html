@@ -119,6 +119,10 @@
           <button id="recBtn">● Начать запись</button>
           <span class="small" id="recStatus"></span>
         </div>
+        <div class="row">
+          <button class="ghost small" id="protoBtn" title="5 с покой → 5 × (сгиб 2 с / разгиб 2 с) → 5 с покой; подсказки на экране">Запись по протоколу (30 с)</button>
+          <select id="protoCh" title="Какой палец сгибать"></select>
+        </div>
       </div>
       <div class="tool">
         <span class="muted small">Воспроизвести запись</span>
@@ -175,8 +179,11 @@
           </div>
         </div>
         <div class="src-panel" data-panel="mock" hidden>
-          <p class="hint">Имитация перчатки с 5 сенсорами (сигнал похож на реальный: АЦП ≈ 213 в покое, шум, выбросы, 50 Гц).</p>
-          <button id="mockStart">Включить демо</button>
+          <p class="hint">Имитация перчатки (сигнал похож на реальный: АЦП ≈ 213 в покое, шум, выбросы, 50 Гц).</p>
+          <div class="row">
+            <select id="mockN"><option value="2">2 сенсора — как прототип</option><option value="5" selected>5 сенсоров</option></select>
+            <button id="mockStart">Включить демо</button>
+          </div>
         </div>
         <div class="status-box">
           <div><span class="dot" id="srcDot"></span> <b id="srcName">Не подключено</b></div>
@@ -220,6 +227,15 @@
 </main>
 
 <div class="toast" id="toast" hidden></div>
+<div class="proto" id="proto" hidden>
+  <div class="proto-box">
+    <div class="small muted" id="protoStep"></div>
+    <div class="proto-cmd" id="protoCmd"></div>
+    <div class="proto-left" id="protoLeft"></div>
+    <div class="bar"><div class="fill cmd" id="protoBar"></div></div>
+    <button class="ghost small" id="protoCancel">Прервать</button>
+  </div>
+</div>
 <script src="/static/hand.js"></script>
 <script src="/static/chart.js"></script>
 <script src="/static/app.js"></script>
