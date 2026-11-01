@@ -28,7 +28,7 @@ from .dsp.segmentation import ImuRestDetector
 CAPTURE_S = 2.0               # замер смещения при подключении и по кнопке
 CAPTURE_MAX_STD_DPS = 1.0     # разброс гироскопа во время замера — иначе «рука двигалась»
 TRACK_ALPHA = 0.005           # уточнение смещения в покое (на отсчёт, ≈ 4 с при 50 Гц)
-YAW_DRIFT_DEG_PER_MIN = 0.6   # оценка дрейфа рысканья после калибровки (docs/analysis/2026-11-01-imu.md)
+YAW_DRIFT_DEG_PER_MIN = 0.3   # дрейф рысканья «в работе» по замеру на модели MPU6050 (docs/analysis/2026-11-01-imu.md)
 
 
 def _mount(x: Vec, z: Vec) -> tuple[Vec, Vec, Vec]:
@@ -120,7 +120,7 @@ class ImuTracker:
         dt = self.clock.tick(now)
         self.count += 1
         self.last_t = now
-        at_rest = self.rest.update(gyro, acc) == "rest"
+        at_rest = self.rest.update(gyro, acc, self.bias if self.bias_ok else None) == "rest"
 
         if self.capture is not None:
             self.capture.add(gyro)
