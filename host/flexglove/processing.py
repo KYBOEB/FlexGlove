@@ -23,6 +23,7 @@ AUTO_REST_SAMPLES = 25      # первые ~0,5 с после подключен
 BEND_ON = 0.6               # гистерезис: «согнут», когда сгиб > 0.6
 BEND_OFF = 0.4              #             «разогнут», когда сгиб < 0.4
 STALE_AFTER_S = 1.0         # нет данных дольше — канал «молчит»
+FLAT_AFTER_S = 3.0          # значение не меняется дольше — подозрительно: живой сенсор всегда шумит (СКО ≈ 3)
 
 
 @dataclass
@@ -50,10 +51,13 @@ class ChannelProcessor:
         self.bend = 0.0
         self.bit = 0
         self.last_update = 0.0
+        self.last_change = 0.0      # когда сырое значение последний раз отличалось от предыдущего
         self.count = 0
 
     # ---------- вход ----------
     def update(self, value: float, now: float) -> None:
+        if self.raw is None or value != self.raw:
+            self.last_change = now
         self.raw = value
         self.count += 1
         self.last_update = now
@@ -99,6 +103,11 @@ class ChannelProcessor:
 
     def stale(self, now: float) -> bool:
         return self.count == 0 or now - self.last_update > STALE_AFTER_S
+
+    def flat(self, now: float) -> bool:
+        """Данные приходят, но значение не меняется FLAT_AFTER_S — сенсор отключён/замкнут
+        или прошивка шлёт только изменения."""
+        return self.count > 0 and not self.stale(now) and now - self.last_change > FLAT_AFTER_S
 
 
 class CalibrationCapture:
