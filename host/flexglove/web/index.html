@@ -135,9 +135,27 @@
       </div>
     </div>
 
+    <div class="card pipe-card">
+      <div class="row between">
+        <h2>Фильтрация сигнала</h2>
+        <span class="small muted">график и сгиб считаются по выходу выбранного конвейера</span>
+      </div>
+      <div class="row">
+        <select id="pipePreset"></select>
+        <button class="ghost small" id="pipeApply" hidden>Применить</button>
+        <span class="small" id="pipeHint"></span>
+      </div>
+      <div id="pipeCustom" hidden>
+        <textarea id="pipeJson" rows="4" spellcheck="false"></textarea>
+        <p class="hint">Список блоков по порядку. Фильтры: <span id="pipeTypes"></span>. Пример:
+          <code>[{"type":"hampel","n":7},{"type":"one_euro","min_cutoff":0.7,"beta":0.02}]</code>.
+          Как сравнить конвейеры на записи — <code>python tools/evaluate.py запись.csv --compare one_euro свой.json</code>.</p>
+      </div>
+    </div>
+
     <div class="card">
       <div class="chart-head">
-        <h2>Каналы</h2>
+        <h2>Каналы <span class="pill" id="motionPill">покой</span></h2>
         <div class="row">
           <label class="check"><input type="checkbox" id="showRaw" checked> сырые значения</label>
           <select id="chartSpan"><option value="5">5 с</option><option value="10" selected>10 с</option><option value="30">30 с</option></select>

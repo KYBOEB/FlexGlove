@@ -206,3 +206,11 @@ select, input[type=number] { font: inherit; font-size: 14px; padding: 6px 9px; b
 .proto-cmd { font-size: 34px; font-weight: 700; }
 .proto-cmd.bend { color: var(--accent); }
 .proto-left { font: 700 48px ui-monospace, Consolas, monospace; }
+
+/* ---------- фильтрация ---------- */
+.pipe-card { margin-bottom: 16px; }
+.pipe-card select { min-width: 220px; }
+.pipe-card textarea { width: 100%; font: 13px ui-monospace, Consolas, monospace; border: 1px solid var(--line);
+  border-radius: 10px; padding: 8px 10px; margin-top: 6px; resize: vertical; }
+.pipe-card textarea.bad { border-color: var(--bad); }
+.pill.motion { background: var(--accent-soft); color: var(--accent); }

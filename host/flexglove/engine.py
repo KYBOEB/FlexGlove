@@ -20,6 +20,8 @@ from .actions import ACTIONS
 from .dsp.recognizers import CommandRecognizer, Role, Sample, armed_bindings, normalize_roles
 from .control import LINK_TIMEOUT_S, GripController
 from .parser import IMU_FIELDS, Frame, describe_raw, parse_message
+from .dsp import presets
+from .dsp.segmentation import HandSegmenter
 from .processing import CalibrationCapture, ChannelProcessor
 from .recording import Recorder
 from .storage import Storage
@@ -52,6 +54,13 @@ class Engine:
         self.commands = CommandRecognizer()        # D-21: роли пальцев, удержание, защита от сжатия
         self._stored_roles: list | None = storage.get("channel_roles")
         self.grip = 0.0                            # степень сжатия кисти по пальцам сжатия
+        self.segmenter = HandSegmenter()           # покой / движение руки (dsp/segmentation.py)
+        self.pipeline_setting: dict[str, Any] = storage.get("pipeline", {"preset": presets.DEFAULT_PRESET})
+        try:
+            self.pipeline_config = presets.resolve(self.pipeline_setting.get("preset", ""), self.pipeline_setting.get("config"))
+        except ValueError:                         # испорченная настройка — не ломаем запуск
+            self.pipeline_setting = {"preset": presets.DEFAULT_PRESET}
+            self.pipeline_config = presets.resolve(presets.DEFAULT_PRESET)
         self.capture: CalibrationCapture | None = None
         self.last_calibration: dict[str, Any] | None = None
 
@@ -125,13 +134,14 @@ class Engine:
                     if tag not in self.tag_order and len(self.tag_order) < MAX_CHANNELS:
                         # новый сенсор: вставляем канал на место по порядку меток
                         self.tag_order = sorted(self.tag_order + [tag])
-                        self.channels.insert(self.tag_order.index(tag), ChannelProcessor())
+                        self.channels.insert(self.tag_order.index(tag), ChannelProcessor(self.pipeline_config))
                         self._load_calibration()
                     if tag in self.tag_order:
                         self._update_channel(self.tag_order.index(tag), v, now)
             if frame.imu is not None:
                 self.imu, self.imu_time = frame.imu, now
                 self.imu_total += 1
+            self.segmenter.update([c.filtered for c in self.channels], now)
             if self.recorder.active:
                 self.recorder.write([c.raw for c in self.channels], now, frame.imu)
             self._set_bits(tuple(c.bit for c in self.channels), now)
@@ -147,10 +157,11 @@ class Engine:
             self.tag_order = []
             self.bits = ()
             self.commands.reset()
+            self.segmenter.reset()
 
     def _ensure_channels(self, n: int) -> None:
         while len(self.channels) < min(n, MAX_CHANNELS):
-            ch = ChannelProcessor()
+            ch = ChannelProcessor(self.pipeline_config)
             cal = self.storage.get("calibration", {})
             i = len(self.channels)
             if i < len(cal.get("open", [])) and i < len(cal.get("fist", [])):
@@ -318,6 +329,22 @@ class Engine:
         """Роли каналов (сжатие / команды) для текущего числа каналов."""
         return normalize_roles(self._stored_roles, max(len(self.channels), len(self.bits)))
 
+    def set_pipeline(self, preset: str, config: list[dict] | None = None) -> list[dict]:
+        """Выбрать конвейер фильтров (пресет или "custom" + описание JSON) для всех каналов.
+        Неверное описание — ValueError (настройка не меняется). Калибровка сохраняется."""
+        cfg = presets.resolve(preset, config)
+        self.pipeline_setting = {"preset": preset, "config": cfg} if preset == "custom" else {"preset": preset}
+        self.pipeline_config = cfg
+        self.storage.put("pipeline", self.pipeline_setting)
+        for ch in self.channels:
+            ch.set_pipeline(cfg)
+        self._event("pipeline", f"Фильтрация: {self.pipeline_title()}", source="manual")
+        return cfg
+
+    def pipeline_title(self) -> str:
+        preset = self.pipeline_setting.get("preset")
+        return presets.PRESETS[preset]["title"] if preset in presets.PRESETS else "свой конвейер"
+
     def set_settings(self, finger_map: list[str] | None = None, debounce_ms: int | None = None,
                      channel_roles: list[dict] | None = None) -> None:
         if channel_roles is not None:
@@ -391,6 +418,9 @@ class Engine:
             "committed": self.commands.committed,
             "roles": [r.as_dict() for r in self.roles()],
             "grip": round(self.grip, 3),
+            "motion": self.segmenter.moving,
+            "pipeline": {"preset": self.pipeline_setting.get("preset"), "title": self.pipeline_title(),
+                         "config": self.pipeline_config},
             "command": {
                 "armed_mode": self.commands.armed_mode,
                 "candidate": self.commands.candidate,
