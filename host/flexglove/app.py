@@ -33,6 +33,7 @@ class ConnectRequest(BaseModel):
     text: str | None = Field(default=None, max_length=50_000_000)   # содержимое CSV для replay
     recording: str | None = None                                     # или имя файла из data/recordings
     loop: bool = True
+    n_channels: int = Field(default=5, ge=1, le=8)                   # число сенсоров в демо-режиме
 
 
 class BindingRequest(BaseModel):
@@ -77,7 +78,7 @@ class AppState:
             await self.disconnect()
             on_raw, on_status = self.engine.on_raw, self.engine.on_source_status
             if req.kind == "mock":
-                src: Source = MockSource(on_raw, on_status)
+                src: Source = MockSource(on_raw, on_status, n_channels=req.n_channels)
             elif req.kind == "serial":
                 if not req.port:
                     raise HTTPException(400, "Не указан порт")

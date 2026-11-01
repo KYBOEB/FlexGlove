@@ -198,3 +198,11 @@ select, input[type=number] { font: inherit; font-size: 14px; padding: 6px 9px; b
   .control-grid, .settings-grid { grid-template-columns: 1fr; }
   .topbar { flex-wrap: wrap; gap: 10px; }
 }
+
+/* ---------- запись по протоколу ---------- */
+.proto { position: fixed; inset: 0; background: #1b233366; display: grid; place-items: center; z-index: 20; }
+.proto-box { background: var(--card); border-radius: 18px; padding: 24px 32px; min-width: 340px; text-align: center; display: grid; gap: 10px;
+  box-shadow: 0 10px 40px #0003; }
+.proto-cmd { font-size: 34px; font-weight: 700; }
+.proto-cmd.bend { color: var(--accent); }
+.proto-left { font: 700 48px ui-monospace, Consolas, monospace; }
