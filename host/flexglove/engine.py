@@ -30,6 +30,8 @@ DEFAULT_DEBOUNCE_MS = 200
 BROADCAST_HZ = 30
 TICK_S = 0.02
 MAX_CHANNELS = 8
+MIN_RATE_HZ = 20.0          # ниже — предупреждение: управление станет рывками (прошивка шлёт 50 Гц)
+WARN_GRACE_S = 2.5          # первые секунды после подключения не предупреждаем (частота ещё набирается)
 
 
 class Engine:
@@ -58,6 +60,7 @@ class Engine:
         self.events: deque[dict] = deque(maxlen=40)
 
         self.source_info: dict[str, Any] = {"kind": None, "name": None, "connected": False, "message": "Не подключено"}
+        self.connected_since = 0.0
         self._msg_times: deque[float] = deque(maxlen=600)
         self.msg_total = 0
         self.unparsed_total = 0
@@ -166,7 +169,10 @@ class Engine:
             self.combo_since = now
 
     def on_source_status(self, **info: Any) -> None:
+        was = self.source_info.get("connected")
         self.source_info.update(info)
+        if self.source_info.get("connected") and not was:
+            self.connected_since = time.monotonic()
         if not self.source_info.get("connected"):
             self._set_mode("none")
             self.prefer_values = False
@@ -328,9 +334,33 @@ class Engine:
         self._dirty = True
 
     # ================= состояние для интерфейса =================
-    def rate(self) -> float:
-        now = time.monotonic()
+    def rate(self, now: float | None = None) -> float:
+        now = time.monotonic() if now is None else now
         return round(sum(1 for t in self._msg_times if now - t <= 2.0) / 2.0, 1)
+
+    def warnings(self, now: float | None = None) -> list[str]:
+        """Предупреждения о качестве потока для «Пульта» и «Отладки потока»."""
+        now = time.monotonic() if now is None else now
+        if not self.source_info.get("connected") or self.source_info.get("kind") == "replay":
+            return []
+        if now - self.connected_since < WARN_GRACE_S:
+            return []
+        out = []
+        rate = self.rate(now)
+        if self.msg_total == 0 or now - self.last_data_time > 1.0:
+            out.append("Данные не приходят больше 1 с. Проверьте питание перчатки; если поток идёт только при движении "
+                       "пальцев — прошивка шлёт значения лишь при изменении, нужна непрерывная отправка 50 Гц.")
+        elif rate < MIN_RATE_HZ:
+            out.append(f"Частота потока {rate:g} сообщ./с — меньше {MIN_RATE_HZ:g}. Захват будет двигаться рывками. "
+                       "Ожидается 50 Гц непрерывно; возможно, прошивка шлёт только изменения или мешают помехи BLE.")
+        if self.mode == "values":
+            for i, ch in enumerate(self.channels):
+                if ch.stale(now) and ch.count:
+                    out.append(f"S{i + 1}: канал молчит больше 1 с (нет данных по этому сенсору).")
+                elif ch.flat(now):
+                    out.append(f"S{i + 1}: значение {ch.raw:g} не меняется 3 с. Живой сенсор всегда немного шумит — "
+                               "проверьте провод и резистор делителя (или прошивка шлёт только изменения).")
+        return out
 
     def _imu_live(self, now: float) -> bool:
         return self.imu is not None and now - self.imu_time <= 1.0
@@ -382,6 +412,7 @@ class Engine:
             "events": list(self.events)[:20],
             "stats": {"rate": self.rate(), "total": self.msg_total, "unparsed": self.unparsed_total,
                       "last_raw": self.last_raw, "format": self.last_format},
+            "warnings": self.warnings(now),
             "imu": ({**dict(zip(IMU_FIELDS, self.imu)), "stale": not self._imu_live(now), "total": self.imu_total}
                     if self.imu is not None else None),
         }

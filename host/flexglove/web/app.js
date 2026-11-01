@@ -78,6 +78,11 @@
     $("#connText").textContent = connected ? `${src.name || "Устройство"} подключено` : (src.message || "Не подключено");
     $("#connRate").textContent = connected ? `${S.stats.rate} сообщ./с` : "";
     $("#noDeviceBanner").hidden = connected;
+    const warns = S.warnings || [];
+    const wbox = $("#streamWarn");
+    const whtml = warns.map((w) => `<div>⚠ ${w}</div>`).join("");
+    if (wbox.innerHTML !== whtml) wbox.innerHTML = whtml;
+    wbox.hidden = !warns.length;
 
     // рука
     const bends = bendsByFinger(chans.map((c) => (c.stale ? 0 : c.bend)), map);
@@ -120,6 +125,7 @@
     $("#dbgFormat").textContent = `${S.mode} · ${S.stats.format || "—"}`;
     $("#dbgRaw").textContent = S.stats.last_raw || "—";
     $("#dbgN").textContent = n;
+    $("#dbgWarn").textContent = warns.length ? warns.join(" · ") : "нет";
     const imu = S.imu;
     $("#dbgImu").textContent = !imu ? "нет данных (протокол v0.2)"
       : `a: ${imu.ax}; ${imu.ay}; ${imu.az} мг · g: ${(imu.gx / 10).toFixed(1)}; ${(imu.gy / 10).toFixed(1)}; ${(imu.gz / 10).toFixed(1)} °/с` +
