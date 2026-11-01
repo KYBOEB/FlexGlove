@@ -19,3 +19,18 @@ def test_elements_toggled_by_hidden_exist_in_html():
     assert ids, "в app.js не найдено переключений hidden"
     missing = [i for i in ids if f'id="{i}"' not in html]
     assert not missing, missing
+
+
+def test_es_modules_served_with_javascript_mime(tmp_path):
+    """3D-рука — ES-модули: браузер грузит их только с JavaScript MIME-типом (на Windows реестр может дать text/plain)."""
+    from fastapi.testclient import TestClient
+
+    from flexglove.app import create_app
+    with TestClient(create_app(tmp_path / "t.db")) as c:
+        for path in ("/static/hand3d.js", "/static/vendor/three/three.module.min.js"):
+            r = c.get(path)
+            assert r.status_code == 200 and "javascript" in r.headers["content-type"]
+        html = c.get("/").text
+        assert '<script type="module" src="/static/hand3d.js">' in html
+    assert "three.module.min.js" in (WEB / "hand3d.js").read_text(encoding="utf-8")
+    assert "MIT" in (WEB / "vendor" / "three" / "LICENSE").read_text(encoding="utf-8")
