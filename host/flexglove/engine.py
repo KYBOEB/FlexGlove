@@ -17,7 +17,7 @@ from pathlib import Path
 from typing import Any
 
 from .actions import ACTIONS
-from .commands import CommandRecognizer, Role, armed_bindings, normalize_roles
+from .dsp.recognizers import CommandRecognizer, Role, Sample, armed_bindings, normalize_roles
 from .control import LINK_TIMEOUT_S, GripController
 from .parser import IMU_FIELDS, Frame, describe_raw, parse_message
 from .processing import CalibrationCapture, ChannelProcessor
@@ -203,19 +203,19 @@ class Engine:
         # 3. калибровка
         if self.capture is not None and self.capture.done(now):
             self._finish_calibration()
-        # 4. жест-команда (commands.py): роли пальцев, удержание, защита от сопутствующего сжатия
+        # 4. жест-команда (dsp/recognizers/combo.py): роли пальцев, удержание, защита от сопутствующего сжатия
         self.commands.roles = roles
         armed = self.controller.armed and self.controller.link_ok
-        result = self.commands.update(self.bits, self.grip, armed, now, self.storage.bindings(), self.debounce_ms / 1000)
-        if result is None:
-            return
-        self._dirty = True
-        combo, action_id = result
-        if action_id == "":
-            self._event("ignored", f"Жест {combo} не выполнен: пальцы команд двигались вместе со сжатием",
-                        source="system", combo=combo)
-        elif action_id in ACTIONS:
-            self.toggle_action(action_id, source="gesture", combo=combo)
+        sample = Sample(t=now, bits=self.bits, grip=self.grip,
+                        context={"armed": armed, "bindings": self.storage.bindings(), "debounce_s": self.debounce_ms / 1000})
+        for ev in self.commands.update(sample):
+            self._dirty = True
+            combo = ev.data["combo"]
+            if ev.kind == "command_ignored":
+                self._event("ignored", f"Жест {combo} не выполнен: пальцы команд двигались вместе со сжатием",
+                            source="system", combo=combo)
+            elif ev.data["action"] in ACTIONS:
+                self.toggle_action(ev.data["action"], source="gesture", combo=combo)
 
     def _bend(self, i: int, now: float) -> float | None:
         if self.mode == "bits":
