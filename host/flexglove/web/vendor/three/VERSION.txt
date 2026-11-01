@@ -1,0 +1,6 @@
+three.js r170 (npm: three@0.170.0)
+Файл: build/three.module.min.js — ES-модуль, без зависимостей.
+Лицензия: MIT (LICENSE рядом).
+Источник: https://registry.npmjs.org/three/-/three-0.170.0.tgz
+SHA-256: 08fd7545d13d2c7fb65ab691530a802dafefd638596501854f267d0fb13c39e7
+Приложение загружает его локально (/static/vendor/three/three.module.min.js), без CDN и интернета.
