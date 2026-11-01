@@ -74,13 +74,18 @@ class HandSegmenter:
 
 
 class ImuRestDetector:
-    """Покой по IMU: за окно n отсчётов (≈ 0,5 с) разброс (СКО) каждой оси гироскопа < gyro_std_dps
-    и модуль ускорения отличается от 1 g меньше чем на acc_tol_g. Смещение гироскопа на покой не влияет —
-    смотрим разброс, а не среднее. Медленное равномерное вращение (< ~0,5 °/с) от покоя не отличить —
-    это ограничение любого MEMS-гироскопа без внешней опоры."""
+    """Покой по IMU за окно n отсчётов (≈ 0,5 с):
+    - разброс (СКО) каждой оси гироскопа < gyro_std_dps — нет дрожания и рывков;
+    - средняя угловая скорость за вычетом известного смещения < max_rate_dps — нет и плавного равномерного
+      вращения (иначе поворот с постоянной скоростью «выучился» бы как смещение);
+    - модуль ускорения отличается от 1 g меньше чем на acc_tol_g.
+    Пока смещение не измерено, порог скорости шире (max_rate_uncal_dps): смещение MPU6050 бывает до нескольких °/с.
+    Вращение медленнее порога от покоя не отличить — ограничение любого MEMS-гироскопа без внешней опоры."""
 
-    def __init__(self, n: int = 25, gyro_std_dps: float = 0.6, acc_tol_g: float = 0.05):
+    def __init__(self, n: int = 25, gyro_std_dps: float = 0.6, acc_tol_g: float = 0.05,
+                 max_rate_dps: float = 2.0, max_rate_uncal_dps: float = 8.0):
         self.n, self.gyro_std, self.acc_tol = n, gyro_std_dps, acc_tol_g
+        self.max_rate, self.max_rate_uncal = max_rate_dps, max_rate_uncal_dps
         self.reset()
 
     def reset(self) -> None:
@@ -88,18 +93,26 @@ class ImuRestDetector:
         self._a_ok: deque = deque(maxlen=self.n)
         self.state = MOTION
 
-    def update(self, gyro_dps: tuple[float, float, float], acc_g: tuple[float, float, float]) -> str:
+    def update(self, gyro_dps: tuple[float, float, float], acc_g: tuple[float, float, float],
+               bias: tuple[float, float, float] | None = None) -> str:
+        """bias — известное смещение гироскопа (None — ещё не измерено)."""
         self._g.append(gyro_dps)
         self._a_ok.append(abs(sum(c * c for c in acc_g) ** 0.5 - 1.0) < self.acc_tol)
-        if len(self._g) < self.n or not all(self._a_ok):
-            self.state = MOTION if len(self._g) == self.n else self.state
+        if len(self._g) < self.n:
             return self.state
+        if not all(self._a_ok):
+            self.state = MOTION
+            return self.state
+        b = bias or (0.0, 0.0, 0.0)
+        limit = self.max_rate if bias is not None else self.max_rate_uncal
         quiet = True
+        rate2 = 0.0
         for axis in range(3):
             vals = [g[axis] for g in self._g]
             m = sum(vals) / len(vals)
             quiet = quiet and (sum((v - m) ** 2 for v in vals) / len(vals)) ** 0.5 < self.gyro_std
-        self.state = REST if quiet else MOTION
+            rate2 += (m - b[axis]) ** 2
+        self.state = REST if quiet and rate2 ** 0.5 < limit else MOTION
         return self.state
 
     @property

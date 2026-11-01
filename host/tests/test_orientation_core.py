@@ -263,3 +263,18 @@ def test_imu_api_in_demo(tmp_path):
         assert c.post("/api/imu/calibrate").json()["calibrating"] is True
         assert c.post("/api/settings", json={"imu_mount": "bad"}).status_code == 400
         assert c.post("/api/settings", json={"hand": "left"}).json()["hand"] == "left"
+
+
+def test_steady_rotation_is_not_learned_as_bias():
+    """Равномерный поворот 45 °/с не похож на покой: смещение не «выучивается», рысканье считается верно."""
+    from flexglove.dsp.segmentation import ImuRestDetector
+    det = ImuRestDetector()
+    for _ in range(30):
+        state = det.update((0.0, 0.0, 45.0), (0.0, 0.0, 1.0), bias=(0.0, 0.0, 0.0))
+    assert state == "motion"
+    tr = ImuTracker()
+    tr.bias, tr.bias_ok = (0.0, 0.0, 0.0), True
+    for i in range(100):                                    # 2 с вращения вокруг вертикали
+        tr.update(raw_from((0, 0, 1), (0, 0, 45.0)), i * DT)
+    assert tr.bias == (0.0, 0.0, 0.0)
+    assert tr.snapshot(2.0)["yaw"] == pytest.approx(90, abs=2)
