@@ -16,9 +16,9 @@ IMU v0.3 ─▶ orientation.py: смещение гироскопа ─▶ ко�
 | `filters.py` | интерфейс `Filter`, реестр `@register`, блоки, `Pipeline.from_config / to_config`, `SampleClock` |
 | `presets.py` | пресеты «Базовый», «One-Euro», «Сильное сглаживание», `resolve()` |
 | `calibration.py`, `normalize.py` | ручная и автоматическая калибровка, сгиб 0..1 |
-| `features.py`, `segmentation.py` | признаки по окну, детектор «покой / движение» |
+| `features.py`, `segmentation.py` | признаки по окну, детектор «покой / движение» для пальцев и `ImuRestDetector` для IMU (малый разброс и малая скорость за вычетом смещения) |
 | `recognizers/` | `Sample` → `update()` → `[Event]`; threshold, combo (D-21), заготовки knn_pose, dynamic |
-| `orientation.py` | кватернионы, `GyroBiasEstimator`, `ComplementaryFilter`, `MadgwickFilter`, `OrientationEstimator` |
+| `orientation.py` | кватернионы, `GyroBiasEstimator`, `ComplementaryFilter`, `MadgwickFilter`, `OrientationEstimator`; в приложении используется через `imu.py` (этап 4) |
 | `synthetic.py` | генератор сигналов и IMU для тестов и `tools/evaluate.py` |
 
 `processing.py` (канал целиком) и `commands.py` — тонкие обёртки с прежним интерфейсом.
