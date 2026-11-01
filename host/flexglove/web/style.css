@@ -15,6 +15,8 @@
   font-family: "Segoe UI", -apple-system, BlinkMacSystemFont, Roboto, "Helvetica Neue", Arial, sans-serif;
 }
 * { box-sizing: border-box; }
+/* атрибут hidden сильнее любых display у классов (.demo-strip { display: flex } и т. п.) */
+[hidden] { display: none !important; }
 body { margin: 0; background: var(--bg); color: var(--text); font-size: 15px; }
 h2 { font-size: 16px; margin: 0 0 12px; }
 a { color: var(--accent); }
