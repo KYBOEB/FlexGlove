@@ -15,6 +15,9 @@
 - изменения меньше мёртвой зоны игнорируются (защита от дрожания и шума);
 - скорость изменения команды ограничена, максимальное сжатие ограничено (аналог ограничения усилия).
 
+Поворот захвата (этап 4, D-25): крен кисти относительно исходной позы → угол поворота захвата по тем же правилам
+(ARM, фиксация, заморозка при потере связи), со своими мёртвой зоной (3°), скоростью (≤ 90 °/с) и пределом (±90°).
+
 Аварийная остановка реального оборудования должна быть независимой (аппаратная кнопка),
 этот контроллер её не заменяет.
 """
@@ -30,6 +33,9 @@ class ControllerConfig:
     deadband: float = 0.03        # доля диапазона
     max_rate: float = 1.5         # доля диапазона в секунду (полный ход ≈ 0,7 с)
     max_close: float = 0.9        # ограничение сжатия захвата
+    rot_deadband_deg: float = 3.0     # поворот: мёртвая зона
+    rot_max_rate_dps: float = 90.0    # поворот: скорость, °/с
+    rot_limit_deg: float = 90.0       # поворот: предел ±
 
 
 @dataclass
@@ -42,6 +48,10 @@ class GripController:
     command: float = 0.0          # команда захвату после всех ограничений
     _accepted: float = 0.0        # цель после мёртвой зоны
     _last_t: float | None = None
+    rot_target: float = 0.0       # желаемый поворот (от кисти), °
+    rot_command: float = 0.0      # команда поворота после ограничений, °
+    _rot_accepted: float = 0.0
+    _rot_last_t: float | None = None
 
     def set_link(self, ok: bool) -> str | None:
         """Возвращает текст события, если состояние связи изменилось."""
@@ -67,6 +77,25 @@ class GripController:
         max_step = self.config.max_rate * dt
         self.command += max(-max_step, min(max_step, diff))
         return self.command
+
+    def step_rotation(self, wrist_roll_deg: float | None, now: float) -> float:
+        """Крен кисти (°, относительно исходной позы) → команда поворота захвата. None — ориентации нет:
+        команда не меняется."""
+        dt = 0.0 if self._rot_last_t is None else max(0.0, min(0.2, now - self._rot_last_t))
+        self._rot_last_t = now
+        if wrist_roll_deg is None:
+            return self.rot_command
+        c = self.config
+        self.rot_target = max(-c.rot_limit_deg, min(c.rot_limit_deg, wrist_roll_deg))
+        if not (self.armed and self.link_ok) or self.hold:
+            return self.rot_command
+        goal = self.rot_target
+        if abs(goal - self._rot_accepted) >= c.rot_deadband_deg or abs(goal) == c.rot_limit_deg:
+            self._rot_accepted = goal
+        diff = self._rot_accepted - self.rot_command
+        max_step = c.rot_max_rate_dps * dt
+        self.rot_command += max(-max_step, min(max_step, diff))
+        return self.rot_command
 
     @property
     def state(self) -> str:

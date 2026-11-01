@@ -17,6 +17,16 @@
   const handMain = new HandView($("#handMain"), { onFinger: (f) => demoToggleFinger(f) });
   const handSettings = new HandView($("#handSettings"));
   const chart = new LaneChart($("#chart"));
+  let hand3d = null;                                   // 3D-рука (hand3d.js, ES-модуль); null — 2D-силуэт
+  function init3d() {
+    if (hand3d || !window.FlexHand3D) return;
+    const box = $("#hand3d");
+    box.hidden = false;
+    hand3d = window.FlexHand3D.create(box);
+    if (hand3d) $("#hand2d").hidden = true;
+    else box.hidden = true;                            // нет WebGL — остаётся 2D-силуэт
+  }
+  window.addEventListener("hand3d-ready", init3d);
 
   // ---------------- утилиты ----------------
   async function api(path, opts = {}) {
@@ -87,6 +97,9 @@
     // рука
     const bends = bendsByFinger(chans.map((c) => (c.stale ? 0 : c.bend)), map);
     handMain.set(bends); handSettings.set(bends);
+    const ori = S.orientation;
+    if (hand3d) hand3d.setTarget({ q: ori && !ori.stale ? ori.q : null, bends, sensed: new Set(map.slice(0, n)), hand: S.hand });
+    renderOrientation(ori);
     $("#mainCombo").textContent = S.combo || "—";
     const bound = S.committed && S.bindings[S.committed];
     $("#mainTarget").textContent = bound ? `→ ${act(bound).title}` : "";
@@ -99,6 +112,7 @@
     $("#cmdVal").textContent = pct(c.command); $("#cmdBar").style.width = pct(c.command);
     $("#limitMark").style.left = pct(c.max_close);
     renderScene(c, S.actions.light);
+    renderRotation(c, ori);
     renderToggles();
     renderCommandStatus(map);
     renderLog();
@@ -134,6 +148,8 @@
         (imu.stale ? " · устарело" : "");
     renderFingerMap(Math.max(n, 5), map, S.roles || []);
     renderBindings(n, map);
+    const hs = $("#handSide"); if (document.activeElement !== hs) hs.value = S.hand || "right";
+    const mt = $("#imuMount"); if (document.activeElement !== mt && ori) mt.value = ori.mount;
     const deb = $("#debounce");
     if (document.activeElement !== deb) deb.value = S.debounce_ms;
   }
@@ -162,6 +178,32 @@
     scene.classList.toggle("grabbed", grabbed);
     scene.classList.toggle("light-on", !!light);
     $("#sceneStatus").textContent = grabbed ? "Образец захвачен" : (c.state === "active" ? "Захват следует за рукой" : STATE_TEXT[c.state]);
+  }
+
+  const deg = (x) => `${x > 0 ? "+" : ""}${Math.round(x || 0)}°`;
+  function renderOrientation(o) {
+    $("#imuBox").hidden = !o;
+    if (!o) return;
+    $("#imuRoll").textContent = deg(o.roll); $("#imuPitch").textContent = deg(o.pitch); $("#imuYaw").textContent = deg(o.yaw);
+    const st = o.calibrating ? "⏳ Калибровка гироскопа: держите руку неподвижно 2 с"
+      : !o.bias_ok ? "Гироскоп не откалиброван — подержите руку неподвижно"
+      : `Гироскоп откалиброван (${o.bias_source}) · ${o.at_rest ? "рука в покое" : "движение"}` + (o.stale ? " · нет данных IMU" : "");
+    $("#imuStatus").textContent = o.message && !o.calibrating && o.message.includes("не принята") ? o.message : st;
+    $("#imuDrift").textContent = `Поворот вокруг вертикали (рысканье) у MPU6050 медленно уходит — ≈ ${String(o.yaw_drift_deg_min).replace(".", ",")}°/мин ` +
+      "по замеру на модели датчика (без калибровки гироскопа — до 20°/мин). Время от времени нажимайте «Обнулить положение». " +
+      "Наклоны (крен, тангаж) не уходят — их держит сила тяжести.";
+    $("#imuZero").disabled = $("#imuCal").disabled = !!o.calibrating;
+  }
+
+  function renderRotation(c, o) {
+    $("#rotMeter").hidden = !o;
+    $("#rotDial").style.display = o ? "" : "none";
+    if (!o) return;
+    $("#rotVal").textContent = `${deg(c.rot_target)} → ${deg(c.rot_command)}`;
+    // вид сверху: губки повёрнуты на команду, пунктир — куда тянет кисть
+    $("#rdJaws").setAttribute("transform", `rotate(${-c.rot_command})`);
+    $("#rdTarget").setAttribute("transform", `rotate(${-c.rot_target})`);
+    $("#rdLabel").textContent = `поворот ${deg(c.rot_command)}`;
   }
 
   function renderToggles() {
@@ -333,6 +375,11 @@
         const map = [...S.finger_map];
         map[+t.dataset.ch] = t.value;
         await api("/api/settings", { method: "POST", body: { finger_map: map } });
+      } else if (t.id === "handSide") {
+        await api("/api/settings", { method: "POST", body: { hand: t.value } });
+      } else if (t.id === "imuMount") {
+        await api("/api/settings", { method: "POST", body: { imu_mount: t.value } });
+        toast("Крепление модуля изменено — ориентация начата заново (калибровка 2 с)");
       } else if (t.id === "debounce") {
         await api("/api/settings", { method: "POST", body: { debounce_ms: +t.value } });
       } else if (t.id === "mockAuto") {
@@ -359,6 +406,15 @@
     api("/api/mock", { method: "POST", body: { bends: Array(S.n_channels || 5).fill(v) } }).catch(() => {});
     $("#mockAuto").checked = false;
   });
+
+  $("#imuZero").addEventListener("click", () => api("/api/imu/zero", { method: "POST" }).then(() => toast("Положение обнулено")).catch((e) => toast(e.message, true)));
+  $("#imuCal").addEventListener("click", () => api("/api/imu/calibrate", { method: "POST" }).catch((e) => toast(e.message, true)));
+  function demoAngles(body) {
+    api("/api/mock", { method: "POST", body }).catch(() => {});
+    $("#mockAuto").checked = false;
+  }
+  $("#rollSlider").addEventListener("input", (e) => demoAngles({ roll: +e.target.value }));
+  $("#pitchSlider").addEventListener("input", (e) => demoAngles({ pitch: +e.target.value }));
 
   $$("#srcKind button").forEach((btn) => btn.addEventListener("click", () => {
     $$("#srcKind button").forEach((x) => x.classList.toggle("active", x === btn));
@@ -539,12 +595,21 @@
     if (!S || S.source.kind !== "mock" || ["INPUT", "SELECT", "TEXTAREA"].includes(document.activeElement.tagName)) return;
     const k = parseInt(e.key, 10);
     if (k >= 1 && k <= S.n_channels) demoToggleFinger(S.finger_map[k - 1]);
+    const arrows = { ArrowLeft: ["rollSlider", -10], ArrowRight: ["rollSlider", 10], ArrowUp: ["pitchSlider", 10], ArrowDown: ["pitchSlider", -10] };
+    if (arrows[e.key] && location.hash !== "#signals" && location.hash !== "#settings") {
+      e.preventDefault();
+      const [id, step] = arrows[e.key], sl = $("#" + id);
+      sl.value = Math.max(+sl.min, Math.min(+sl.max, +sl.value + step));
+      demoAngles(id === "rollSlider" ? { roll: +sl.value } : { pitch: +sl.value });
+    }
   });
 
   // ---------------- старт ----------------
   (async function init() {
     showTab();
     try { META = await api("/api/meta"); $("#ver").textContent = "v" + META.version; } catch (e) { /* сервер стартует */ }
+    $("#imuMount").innerHTML = (META.imu_mounts || []).map((m) => `<option value="${m.id}">${m.title}</option>`).join("");
+    init3d();
     await loadPipelines();
     connectWS();
   })();
