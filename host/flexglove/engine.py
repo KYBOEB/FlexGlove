@@ -18,7 +18,7 @@ from typing import Any
 
 from .actions import ACTIONS
 from .control import LINK_TIMEOUT_S, GripController
-from .parser import Frame, describe_raw, parse_message
+from .parser import IMU_FIELDS, Frame, describe_raw, parse_message
 from .processing import CalibrationCapture, ChannelProcessor
 from .recording import Recorder
 from .storage import Storage
@@ -61,6 +61,9 @@ class Engine:
         self.last_raw = ""
         self.last_format = ""
         self.last_data_time = 0.0
+        self.imu: tuple[float, ...] | None = None   # последний отсчёт MPU6050 (протокол v0.3)
+        self.imu_time = 0.0
+        self.imu_total = 0
 
         self._subscribers: set[asyncio.Queue] = set()
         self._dirty = True
@@ -120,8 +123,11 @@ class Engine:
                         self._load_calibration()
                     if tag in self.tag_order:
                         self._update_channel(self.tag_order.index(tag), v, now)
+            if frame.imu is not None:
+                self.imu, self.imu_time = frame.imu, now
+                self.imu_total += 1
             if self.recorder.active:
-                self.recorder.write([c.raw for c in self.channels], now)
+                self.recorder.write([c.raw for c in self.channels], now, frame.imu)
             self._set_bits(tuple(c.bit for c in self.channels), now)
         else:
             self._set_mode("bits")
@@ -161,6 +167,7 @@ class Engine:
         if not self.source_info.get("connected"):
             self._set_mode("none")
             self.prefer_values = False
+            self.imu = None
         self._dirty = True
 
     # ================= такт: жесты, контроллер, калибровка =================
@@ -273,7 +280,7 @@ class Engine:
 
     # ================= запись =================
     def start_recording(self) -> str:
-        path = self.recorder.start(len(self.channels) or 5)
+        path = self.recorder.start(len(self.channels) or 5, imu=self._imu_live(time.monotonic()))
         self._event("record", f"Запись начата: {path.name}", source="manual")
         return path.name
 
@@ -302,6 +309,9 @@ class Engine:
     def rate(self) -> float:
         now = time.monotonic()
         return round(sum(1 for t in self._msg_times if now - t <= 2.0) / 2.0, 1)
+
+    def _imu_live(self, now: float) -> bool:
+        return self.imu is not None and now - self.imu_time <= 1.0
 
     def snapshot(self) -> dict[str, Any]:
         now = time.monotonic()
@@ -340,6 +350,8 @@ class Engine:
             "events": list(self.events)[:20],
             "stats": {"rate": self.rate(), "total": self.msg_total, "unparsed": self.unparsed_total,
                       "last_raw": self.last_raw, "format": self.last_format},
+            "imu": ({**dict(zip(IMU_FIELDS, self.imu)), "stale": not self._imu_live(now), "total": self.imu_total}
+                    if self.imu is not None else None),
         }
 
     def subscribe(self) -> asyncio.Queue:

@@ -119,6 +119,10 @@
     $("#dbgFormat").textContent = `${S.mode} · ${S.stats.format || "—"}`;
     $("#dbgRaw").textContent = S.stats.last_raw || "—";
     $("#dbgN").textContent = n;
+    const imu = S.imu;
+    $("#dbgImu").textContent = !imu ? "нет данных (протокол v0.2)"
+      : `a: ${imu.ax}; ${imu.ay}; ${imu.az} мг · g: ${(imu.gx / 10).toFixed(1)}; ${(imu.gy / 10).toFixed(1)}; ${(imu.gz / 10).toFixed(1)} °/с` +
+        (imu.stale ? " · устарело" : "");
     renderFingerMap(Math.max(n, 5), map);
     renderBindings(n, map);
     const deb = $("#debounce");
