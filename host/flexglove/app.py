@@ -40,9 +40,15 @@ class BindingRequest(BaseModel):
     action_id: str | None = None
 
 
+class RoleModel(BaseModel):
+    grip: bool = True      # канал задаёт сжатие захвата
+    cmd: bool = True       # канал участвует в жестах-командах
+
+
 class SettingsRequest(BaseModel):
     finger_map: list[str] | None = None
     debounce_ms: int | None = Field(default=None, ge=0, le=2000)
+    channel_roles: list[RoleModel] | None = Field(default=None, max_length=8)
 
 
 class MockRequest(BaseModel):
@@ -232,8 +238,10 @@ def create_app(db_path: Path | str = DEFAULT_DB, demo: bool = False) -> FastAPI:
     async def settings(req: SettingsRequest):
         if req.finger_map is not None and any(f not in FINGERS for f in req.finger_map):
             raise HTTPException(400, "Неизвестный палец")
-        engine.set_settings(req.finger_map, req.debounce_ms)
-        return {"finger_map": engine.finger_map, "debounce_ms": engine.debounce_ms}
+        roles = [r.model_dump() for r in req.channel_roles] if req.channel_roles is not None else None
+        engine.set_settings(req.finger_map, req.debounce_ms, roles)
+        return {"finger_map": engine.finger_map, "debounce_ms": engine.debounce_ms,
+                "channel_roles": [r.as_dict() for r in engine.roles()]}
 
     @app.post("/api/actions/{action_id}/toggle")
     async def toggle(action_id: str):
