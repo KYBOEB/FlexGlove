@@ -1,7 +1,7 @@
 from pathlib import Path
 
 from flexglove.engine import Engine
-from flexglove.parser import Frame
+from flexglove.parser import Frame, parse_message
 from flexglove.storage import Storage
 
 
@@ -88,3 +88,58 @@ def test_recording_roundtrip(tmp_path):
 def test_desktop_module_imports_and_detects_no_instance():
     from flexglove import desktop
     assert desktop.is_flexglove("http://127.0.0.1:9") is False
+
+
+# ---------------- предупреждения о потоке (этап 2, задача d) ----------------
+def stream(e, line, seconds, hz, t0):
+    t = t0
+    while t < t0 + seconds:
+        e._msg_times.append(t)
+        e.msg_total += 1
+        e._on_frame(parse_message(line, prefer_values=True)[0], t)
+        t += 1 / hz
+    return t
+
+
+def connected_engine():
+    e = make()
+    e.on_source_status(kind="ble", name="g", connected=True)
+    e.connected_since = 0.0
+    return e
+
+
+def test_no_warnings_for_healthy_noisy_stream():
+    import random
+    rnd = random.Random(3)
+    e = connected_engine()
+    t = 0.0
+    for _ in range(250):                                  # 5 с, 50 Гц, шумящие сенсоры
+        e._msg_times.append(t); e.msg_total += 1
+        e._on_frame(parse_message(f"{213 + round(rnd.gauss(0, 3))};{300 + round(rnd.gauss(0, 3))}")[0], t)
+        t += 0.02
+    assert e.warnings(t) == []
+
+
+def test_low_rate_warning():
+    e = connected_engine()
+    t = stream(e, "213;300", 4.0, 10, 0.0)                # прошивка шлёт 10 раз в секунду
+    assert any("Частота потока" in w for w in e.warnings(t))
+
+
+def test_flat_channel_warning():
+    e = connected_engine()
+    t = 0.0
+    for i in range(250):                                  # S1 шумит, S2 застыл
+        e._msg_times.append(t); e.msg_total += 1
+        e._on_frame(parse_message(f"{213 + (i % 3)};300")[0], t)
+        t += 0.02
+    w = e.warnings(t)
+    assert any(x.startswith("S2:") for x in w) and not any(x.startswith("S1:") for x in w)
+
+
+def test_no_data_warning_and_grace_period():
+    e = connected_engine()
+    t = stream(e, "213;300", 1.0, 50, 0.0)
+    assert any("не приходят" in w for w in e.warnings(t + 2.0))
+    e.connected_since = t + 1.5
+    assert e.warnings(t + 2.0) == []                      # сразу после подключения не пугаем

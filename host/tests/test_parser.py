@@ -62,3 +62,32 @@ def test_single_byte_mask():
 @pytest.mark.parametrize("msg", [b"", b"hello", b"\n\n", b"# debug ch1=213", b"1;2;3;4;5;6;7;8;9"])
 def test_garbage(msg):
     assert parse_message(msg) == []
+
+
+# ---------- протокол v0.3: гибкие + MPU6050 ----------
+def test_v03_flex_and_imu():
+    (f,) = parse_message(b"213;300|12;-4;998;5;-12;3\n")
+    assert f.kind == "values" and f.values == (213, 300)
+    assert f.imu == (12, -4, 998, 5, -12, 3) and f.fmt == "text-values+imu"
+
+
+def test_v03_five_flex_sensors_fit():
+    """5 гибких + 6 IMU = 11 чисел — больше MAX_CHANNELS, но IMU не считается каналами."""
+    (f,) = parse_message("213;215;210;220;218|0;0;1000;0;0;0")
+    assert f.n == 5 and f.imu == (0, 0, 1000, 0, 0, 0)
+
+
+def test_v02_line_has_no_imu():
+    (f,) = parse_message(b"213;300\n")
+    assert f.imu is None and f.fmt == "text-values"
+
+
+@pytest.mark.parametrize("msg, values", [(b"213|215", (213, 215)), (b"1|2|3|4|5|6|7", (1, 2, 3, 4, 5, 6, 7))])
+def test_pipe_without_six_imu_numbers_is_plain_separator(msg, values):
+    (f,) = parse_message(msg, prefer_values=True)
+    assert f.imu is None and f.values == tuple(float(v) for v in values)
+
+
+@pytest.mark.parametrize("msg", [b"213;300|12;-4;998", b"213;300|12", b"213;300|a;b;c;d;e;f", b"213;300|1;2;3;4;5;6;7;8;9"])
+def test_v03_broken_imu_is_rejected(msg):
+    assert parse_message(msg) == []

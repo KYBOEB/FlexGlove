@@ -1,121 +1,107 @@
-"""Обработка сигнала одного сенсора: фильтрация, калибровка, степень сгиба, состояние 0/1.
+"""Обработка сигнала одного сенсора: конвейер фильтров → калибровка → степень сгиба → состояние 0/1.
+
+С этапа 3 блоки живут в модуле dsp/ (решение D-18), здесь — сборка канала с прежним интерфейсом:
+
+    сырое значение АЦП → конвейер фильтров (пресет «Базовый»: медиана 5 → сглаживание α 0,35; dsp/filters.py)
+                        → степень сгиба 0..1 по калибровке или автокалибровке (dsp/calibration.py, dsp/normalize.py)
+                        → состояние 0/1 с гистерезисом 0,4 / 0,6 (dsp/recognizers/threshold.py)
 
 Параметры подобраны по записи с ESP32 (docs/analysis/2026-10-25-sensor-stream.md):
 поток ~50 Гц, шум в покое — СКО ≈ 3 единицы АЦП, редкие выбросы до ±30 единиц.
-
-Цепочка для каждого канала:
-    сырое значение АЦП → медиана по 5 (убирает одиночные выбросы)
-                        → экспоненциальное сглаживание (убирает шум)
-                        → степень сгиба 0..1 (по калибровке или автокалибровке)
-                        → состояние 0/1 с гистерезисом (для жестов-комбинаций)
 """
 from __future__ import annotations
 
-import statistics
-from collections import deque
-from dataclasses import dataclass
+from typing import Any
+
+from .dsp import normalize
+from .dsp.calibration import (  # noqa: F401 - прежние имена для остального кода и инструментов
+    AUTO_REST_SAMPLES,
+    MIN_AUTO_SPAN,
+    MIN_CAL_SPAN,
+    AutoCalibrator,
+    Calibration,
+    CalibrationCapture,
+)
+from .dsp.filters import Pipeline
+from .dsp.presets import DEFAULT_PRESET, PRESETS
+from .dsp.recognizers.threshold import BEND_OFF, BEND_ON, Hysteresis
 
 MEDIAN_WINDOW = 5
-EMA_ALPHA = 0.35            # при 50 Гц постоянная времени ≈ 50 мс
-MIN_CAL_SPAN = 15.0         # калибровка с меньшим размахом считается неудачной (≈ 5 СКО шума)
-MIN_AUTO_SPAN = 30.0        # автокалибровка включается, когда отклонение от покоя ≥ 30 единиц (≈ 10 СКО)
-AUTO_REST_SAMPLES = 25      # первые ~0,5 с после подключения считаем «ладонь раскрыта»
-BEND_ON = 0.6               # гистерезис: «согнут», когда сгиб > 0.6
-BEND_OFF = 0.4              #             «разогнут», когда сгиб < 0.4
+EMA_ALPHA = 0.35            # при 50 Гц постоянная времени ≈ 50 мс (пресет «Базовый»)
 STALE_AFTER_S = 1.0         # нет данных дольше — канал «молчит»
-
-
-@dataclass
-class Calibration:
-    open: float | None = None   # значение при разогнутом пальце
-    fist: float | None = None   # значение при согнутом пальце
-
-    @property
-    def valid(self) -> bool:
-        return self.open is not None and self.fist is not None and abs(self.fist - self.open) >= MIN_CAL_SPAN
+FLAT_AFTER_S = 3.0          # значение не меняется дольше — подозрительно: живой сенсор всегда шумит (СКО ≈ 3)
 
 
 class ChannelProcessor:
-    def __init__(self) -> None:
+    def __init__(self, pipeline_config: list[dict[str, Any]] | None = None) -> None:
         self.cal = Calibration()
+        self.pipeline_config = pipeline_config or PRESETS[DEFAULT_PRESET]["config"]
         self.reset()
 
     def reset(self) -> None:
+        self.pipeline = Pipeline.from_config(self.pipeline_config)
+        self.auto = AutoCalibrator()
+        self.hysteresis = Hysteresis(BEND_ON, BEND_OFF)
         self.raw: float | None = None
         self.filtered: float | None = None
-        self._window: deque[float] = deque(maxlen=MEDIAN_WINDOW)
-        self._rest_samples: list[float] = []
-        self.auto_rest: float | None = None
-        self.auto_max_dev = 0.0
         self.bend = 0.0
         self.bit = 0
         self.last_update = 0.0
+        self.last_change = 0.0      # когда сырое значение последний раз отличалось от предыдущего
         self.count = 0
+
+    def set_pipeline(self, config: list[dict[str, Any]]) -> None:
+        """Сменить конвейер: состояние фильтров начинается заново, калибровка и автокалибровка сохраняются
+        (у всех фильтров коэффициент передачи на постоянном сигнале = 1)."""
+        self.pipeline = Pipeline.from_config(config)
+        self.pipeline_config = config
+
+    # ---------- автокалибровка: прежние имена атрибутов ----------
+    @property
+    def auto_rest(self) -> float | None:
+        return self.auto.rest
+
+    @auto_rest.setter
+    def auto_rest(self, value: float | None) -> None:
+        self.auto.rest = value
+
+    @property
+    def auto_max_dev(self) -> float:
+        return self.auto.max_dev
+
+    @auto_max_dev.setter
+    def auto_max_dev(self, value: float) -> None:
+        self.auto.max_dev = value
+
+    @property
+    def _rest_samples(self) -> list[float]:
+        return self.auto.rest_samples
+
+    @_rest_samples.setter
+    def _rest_samples(self, value: list[float]) -> None:
+        self.auto.rest_samples = value
 
     # ---------- вход ----------
     def update(self, value: float, now: float) -> None:
+        if self.raw is None or value != self.raw:
+            self.last_change = now
         self.raw = value
         self.count += 1
         self.last_update = now
-        self._window.append(value)
-        med = statistics.median(self._window)
-        self.filtered = med if self.filtered is None else self.filtered + EMA_ALPHA * (med - self.filtered)
-        self._update_auto()
-        self.bend = self._compute_bend()
-        if self.bend > BEND_ON:
-            self.bit = 1
-        elif self.bend < BEND_OFF:
-            self.bit = 0
-
-    def _update_auto(self) -> None:
-        assert self.filtered is not None
-        if self.auto_rest is None:
-            self._rest_samples.append(self.filtered)
-            if len(self._rest_samples) >= AUTO_REST_SAMPLES:
-                self.auto_rest = statistics.median(self._rest_samples)
-            return
-        self.auto_max_dev = max(self.auto_max_dev, abs(self.filtered - self.auto_rest))
-
-    def _compute_bend(self) -> float:
-        f = self.filtered
-        if f is None:
-            return 0.0
-        if self.cal.valid:
-            b = (f - self.cal.open) / (self.cal.fist - self.cal.open)  # type: ignore[operator]
-        elif self.auto_rest is not None and self.auto_max_dev >= MIN_AUTO_SPAN:
-            b = abs(f - self.auto_rest) / self.auto_max_dev
-        else:
-            return 0.0
-        return min(1.0, max(0.0, b))
+        self.filtered = self.pipeline.process(value, now)
+        self.auto.update(self.filtered)
+        self.bend = normalize.bend(self.filtered, self.cal, self.auto)
+        self.bit = self.hysteresis.update(self.bend)
 
     # ---------- состояние ----------
     @property
     def mode(self) -> str:
-        if self.cal.valid:
-            return "calibrated"
-        if self.auto_rest is not None and self.auto_max_dev >= MIN_AUTO_SPAN:
-            return "auto"
-        return "uncalibrated"
+        return normalize.mode(self.cal, self.auto)
 
     def stale(self, now: float) -> bool:
         return self.count == 0 or now - self.last_update > STALE_AFTER_S
 
-
-class CalibrationCapture:
-    """Сбор отфильтрованных значений за несколько секунд для калибровки «ладонь» / «кулак»."""
-
-    def __init__(self, target: str, n_channels: int, started: float, duration: float = 1.5):
-        self.target = target
-        self.started = started
-        self.duration = duration
-        self.samples: list[list[float]] = [[] for _ in range(n_channels)]
-
-    def add(self, channel: int, value: float) -> None:
-        if channel < len(self.samples):
-            self.samples[channel].append(value)
-
-    def done(self, now: float) -> bool:
-        return now - self.started >= self.duration
-
-    def result(self) -> list[float | None]:
-        return [statistics.median(s) if s else None for s in self.samples]
+    def flat(self, now: float) -> bool:
+        """Данные приходят, но значение не меняется FLAT_AFTER_S — сенсор отключён/замкнут
+        или прошивка шлёт только изменения."""
+        return self.count > 0 and not self.stale(now) and now - self.last_change > FLAT_AFTER_S
