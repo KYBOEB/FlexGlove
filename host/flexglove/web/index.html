@@ -78,6 +78,10 @@
           <div class="bar"><div class="fill cmd" id="cmdBar"></div><div class="limit" id="limitMark" title="ограничение сжатия"></div></div>
         </div>
         <div class="toggles" id="toggles"></div>
+        <div class="cmd-status" id="cmdStatus">
+          <div class="small" id="cmdText"></div>
+          <div class="bar thin"><div class="fill cmd" id="cmdHoldBar"></div></div>
+        </div>
         <button class="ghost small" id="resetActions">Сбросить пульт</button>
         <p class="note">Аварийная остановка реального оборудования — отдельной аппаратной кнопкой, не через перчатку.</p>
       </div>
@@ -194,13 +198,19 @@
       <div class="card">
         <h2>2. Каналы и пальцы</h2>
         <div class="hand-wrap"><svg id="handSettings" class="hand"></svg></div>
+        <p class="hint">Для каждого канала: какой палец и его роль. <b>Сжатие</b> — палец ведёт захват (среднее сгибов
+          таких пальцев). <b>Команды</b> — палец участвует в жестах. Пока управление активно, пальцы сжатия из жестов
+          исключаются, а команда срабатывает удержанием ≥ 1 с и только если пальцы сжатия при этом неподвижны.</p>
         <div id="fingerMap" class="finger-map"></div>
-        <label class="row">Удержание жеста перед срабатыванием, мс <input type="number" id="debounce" min="0" max="2000" step="50"></label>
+        <p class="hint warn-text" id="rolesWarn" hidden></p>
+        <label class="row">Удержание жеста перед срабатыванием (управление не активно), мс <input type="number" id="debounce" min="0" max="2000" step="50"></label>
       </div>
 
       <div class="card wide">
         <div class="row between"><h2>3. Жесты-команды</h2><button class="ghost small" id="clearBindings">Удалить все привязки</button></div>
-        <p class="hint">Все комбинации положений пальцев (согнут / разогнут). Покажите жест — его карточка подсветится; выберите команду. Одна команда — одна комбинация. «Все разогнуты» — покой, не привязывается.</p>
+        <p class="hint">Все комбинации положений пальцев (согнут / разогнут). Покажите жест — его карточка подсветится; выберите команду. Одна команда — одна комбинация. «Все разогнуты» — покой, не привязывается.
+          Метка «при ARM» показывает, какой жест работает, пока управление активно (там видны только пальцы «чисто команд»;
+          если жесты совпали, выигрывает «Управление захватом», затем «Фиксация»).</p>
         <div class="bind-grid" id="bindGrid"></div>
       </div>
     </div>

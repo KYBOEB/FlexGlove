@@ -95,6 +95,7 @@
     $("#limitMark").style.left = pct(c.max_close);
     renderScene(c, S.actions.light);
     renderToggles();
+    renderCommandStatus(map);
     renderLog();
 
     const isMock = src.kind === "mock" && connected;
@@ -123,7 +124,7 @@
     $("#dbgImu").textContent = !imu ? "нет данных (протокол v0.2)"
       : `a: ${imu.ax}; ${imu.ay}; ${imu.az} мг · g: ${(imu.gx / 10).toFixed(1)}; ${(imu.gy / 10).toFixed(1)}; ${(imu.gz / 10).toFixed(1)} °/с` +
         (imu.stale ? " · устарело" : "");
-    renderFingerMap(Math.max(n, 5), map);
+    renderFingerMap(Math.max(n, 5), map, S.roles || []);
     renderBindings(n, map);
     const deb = $("#debounce");
     if (document.activeElement !== deb) deb.value = S.debounce_ms;
@@ -170,6 +171,24 @@
       const html = comboOf[id] ? `<span class="chip">${comboOf[id]}</span>` : `<span class="chip none">нет жеста</span>`;
       const tb = b.querySelector(".t-bind"); if (tb.innerHTML !== html) tb.innerHTML = html;
     });
+  }
+
+  function renderCommandStatus(map) {
+    const cs = S.command || {}, roles = S.roles || [], box = $("#cmdStatus");
+    const pure = roles.map((r, i) => (r.cmd && !r.grip ? i : -1)).filter((i) => i >= 0);
+    const armed = cs.armed_mode;
+    let text;
+    if (!S.n_channels) text = "";
+    else if (!armed) text = "Управление не активно: жесты — по всем пальцам команд.";
+    else if (!pure.length) text = "Управление активно. Жестовых команд нет: все пальцы ведут захват (снимите ARM кнопкой).";
+    else {
+      const items = Object.entries(cs.armed_bindings || {}).map(([combo, a]) => `${bentNames(combo, map)} → ${act(a).title}`);
+      text = `Управление активно. Команды удержанием ${cs.hold_s || 1} с: ${items.length ? items.join("; ") : "нет привязок"}.`;
+    }
+    if (cs.blocked) text = "Жест не выполнен: пальцы команд двигались вместе со сжатием.";
+    $("#cmdText").textContent = text;
+    box.classList.toggle("blocked", !!cs.blocked);
+    $("#cmdHoldBar").style.width = pct(cs.blocked ? 0 : cs.progress);
   }
 
   function renderLog() {
@@ -227,17 +246,34 @@
       : S.last_calibration ? `Откалибровано каналов: ${S.last_calibration.valid_channels} из ${S.n_channels}` : (calOk ? "" : "нужен поток значений АЦП");
   }
 
-  function renderFingerMap(n, map) {
-    const key = n + "|" + map.join();
+  function renderFingerMap(n, map, roles) {
+    const shown = S.n_channels || n;
+    const key = shown + "|" + map.join() + "|" + JSON.stringify(roles);
     if (key === mapKey) return;
     mapKey = key;
     const opts = (sel) => META.fingers.map((f) => `<option value="${f}" ${f === sel ? "selected" : ""}>${fname(f)}</option>`).join("");
-    $("#fingerMap").innerHTML = Array.from({ length: n }, (_, i) =>
-      `<label><span><span class="swatch" style="background:${CHANNEL_COLORS[i]}"></span>Канал S${i + 1}</span><select data-ch="${i}">${opts(map[i])}</select></label>`).join("");
+    const role = (i) => roles[i] || { grip: true, cmd: true };
+    $("#fingerMap").innerHTML = Array.from({ length: shown }, (_, i) =>
+      `<div class="fm-row"><span><span class="swatch" style="background:${CHANNEL_COLORS[i]}"></span>Канал S${i + 1}</span>
+        <select data-ch="${i}">${opts(map[i])}</select>
+        <label class="check"><input type="checkbox" data-role="grip" data-ch="${i}" ${role(i).grip ? "checked" : ""}> сжатие</label>
+        <label class="check"><input type="checkbox" data-role="cmd" data-ch="${i}" ${role(i).cmd ? "checked" : ""}> команды</label></div>`).join("");
+    const r = roles.slice(0, shown);
+    const warn = !r.length ? "" : !r.some((x) => x.grip) ? "Нет ни одного пальца сжатия — захват не будет следовать за рукой."
+      : !r.some((x) => x.cmd && !x.grip) ? "Нет пальцев «только команды» — пока управление активно, жесты не работают (ARM снимается кнопкой)." : "";
+    $("#rolesWarn").textContent = warn; $("#rolesWarn").hidden = !warn;
+  }
+
+  function armedLabel(combo) {
+    const a = S.bindings[combo];
+    if (!a) return "";
+    const ab = (S.command || {}).armed_bindings || {};
+    const ok = Object.entries(ab).some(([proj, act_]) => act_ === a && [...proj].every((ch, i) => ch === "0" || combo[i] === "1"));
+    return `<div class="bc-armed ${ok ? "on" : ""}">${ok ? "✓ работает при ARM" : "при ARM — нет"}</div>`;
   }
 
   function renderBindings(n, map) {
-    const key = JSON.stringify([n, map, S.bindings, META.actions.length]);
+    const key = JSON.stringify([n, map, S.bindings, META.actions.length, (S.command || {}).armed_bindings]);
     if (key !== bindKey) {
       bindKey = key;
       const opts = (sel) => `<option value="">— нет команды —</option>` +
@@ -247,7 +283,7 @@
         const rest = !c.includes("1");
         return `<div class="bind-card ${S.bindings[c] ? "bound" : ""}" data-combo="${c}"><svg></svg>
           <div class="bc-combo">${c}</div><div class="small muted">${bentNames(c, map)}</div>
-          ${rest ? `<div class="bc-rest">покой — без команды</div>` : `<select data-combo="${c}">${opts(S.bindings[c])}</select>`}</div>`;
+          ${rest ? `<div class="bc-rest">покой — без команды</div>` : `<select data-combo="${c}">${opts(S.bindings[c])}</select>${armedLabel(c)}`}</div>`;
       }).join("") : `<p class="muted">Подключите перчатку или демо — появятся все комбинации для числа каналов.</p>`;
       $$("#bindGrid .bind-card").forEach((card) => {
         const hv = new HandView(card.querySelector("svg"), { static: true });
@@ -281,6 +317,10 @@
       if (t.matches("select[data-combo]")) {
         await api("/api/bindings", { method: "POST", body: { combo: t.dataset.combo, action_id: t.value || null } });
         toast(t.value ? `Жест ${t.dataset.combo} → ${act(t.value).title}` : `Привязка ${t.dataset.combo} снята`);
+      } else if (t.matches("input[data-role]")) {
+        const roles = (S.roles || []).map((r) => ({ ...r }));
+        roles[+t.dataset.ch][t.dataset.role] = t.checked;
+        await api("/api/settings", { method: "POST", body: { channel_roles: roles } });
       } else if (t.matches("select[data-ch]")) {
         const map = [...S.finger_map];
         map[+t.dataset.ch] = t.value;

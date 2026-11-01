@@ -17,6 +17,7 @@ from pathlib import Path
 from typing import Any
 
 from .actions import ACTIONS
+from .commands import CommandRecognizer, Role, armed_bindings, normalize_roles
 from .control import LINK_TIMEOUT_S, GripController
 from .parser import IMU_FIELDS, Frame, describe_raw, parse_message
 from .processing import CalibrationCapture, ChannelProcessor
@@ -46,7 +47,9 @@ class Engine:
         self.tag_order: list[int] = []     # метки каналов в порядке номеров
         self.bits: tuple[int, ...] = ()
         self.combo_since = 0.0
-        self.committed: str | None = None
+        self.commands = CommandRecognizer()        # D-21: роли пальцев, удержание, защита от сжатия
+        self._stored_roles: list | None = storage.get("channel_roles")
+        self.grip = 0.0                            # степень сжатия кисти по пальцам сжатия
         self.capture: CalibrationCapture | None = None
         self.last_calibration: dict[str, Any] | None = None
 
@@ -140,7 +143,7 @@ class Engine:
             self.channels = []
             self.tag_order = []
             self.bits = ()
-            self.committed = None
+            self.commands.reset()
 
     def _ensure_channels(self, n: int) -> None:
         while len(self.channels) < min(n, MAX_CHANNELS):
@@ -182,26 +185,30 @@ class Engine:
         msg = self.controller.set_link(bool(link_ok))
         if msg:
             self._event("link", msg, source="system")
-        # 2. захват: желаемое сжатие = средний сгиб пальцев с данными
-        live = [self._bend(i, now) for i in range(len(self.channels))]
+        # 2. захват: желаемое сжатие = средний сгиб пальцев с ролью «сжатие» (D-21)
+        roles = self.roles()
+        live = [self._bend(i, now) for i in range(len(self.channels)) if roles[i].grip]
         live = [b for b in live if b is not None]
+        self.grip = sum(live) / len(live) if live else 0.0
         before = self.controller.command
-        self.controller.step(sum(live) / len(live) if live else 0.0, now)
+        self.controller.step(self.grip, now)
         if abs(self.controller.command - before) > 1e-4:
             self._dirty = True
         # 3. калибровка
         if self.capture is not None and self.capture.done(now):
             self._finish_calibration()
-        # 4. жест-комбинация: фиксируется после удержания debounce_ms
-        if not self.bits:
+        # 4. жест-команда (commands.py): роли пальцев, удержание, защита от сопутствующего сжатия
+        self.commands.roles = roles
+        armed = self.controller.armed and self.controller.link_ok
+        result = self.commands.update(self.bits, self.grip, armed, now, self.storage.bindings(), self.debounce_ms / 1000)
+        if result is None:
             return
-        combo = "".join(str(b) for b in self.bits)
-        if combo == self.committed or (now - self.combo_since) * 1000 < self.debounce_ms:
-            return
-        self.committed = combo
         self._dirty = True
-        action_id = self.storage.bindings().get(combo)
-        if action_id in ACTIONS:
+        combo, action_id = result
+        if action_id == "":
+            self._event("ignored", f"Жест {combo} не выполнен: пальцы команд двигались вместе со сжатием",
+                        source="system", combo=combo)
+        elif action_id in ACTIONS:
             self.toggle_action(action_id, source="gesture", combo=combo)
 
     def _bend(self, i: int, now: float) -> float | None:
@@ -296,7 +303,22 @@ class Engine:
         self.storage.set_binding(combo, action_id)
         self._dirty = True
 
-    def set_settings(self, finger_map: list[str] | None = None, debounce_ms: int | None = None) -> None:
+    @property
+    def committed(self) -> str | None:
+        """Последняя комбинация, по которой принято решение (для интерфейса и тестов)."""
+        return self.commands.committed
+
+    def roles(self) -> list[Role]:
+        """Роли каналов (сжатие / команды) для текущего числа каналов."""
+        return normalize_roles(self._stored_roles, max(len(self.channels), len(self.bits)))
+
+    def set_settings(self, finger_map: list[str] | None = None, debounce_ms: int | None = None,
+                     channel_roles: list[dict] | None = None) -> None:
+        if channel_roles is not None:
+            current = [r.as_dict() for r in normalize_roles(self._stored_roles, max(len(channel_roles), 8))]
+            current[: len(channel_roles)] = [{"grip": bool(r.get("grip")), "cmd": bool(r.get("cmd"))} for r in channel_roles]
+            self._stored_roles = current
+            self.storage.put("channel_roles", current)
         if finger_map is not None:
             self.finger_map = finger_map
             self.storage.put("finger_map", finger_map)
@@ -336,7 +358,17 @@ class Engine:
             "n_channels": n,
             "channels": channels,
             "combo": "".join(str(b) for b in self.bits) if self.bits else None,
-            "committed": self.committed,
+            "committed": self.commands.committed,
+            "roles": [r.as_dict() for r in self.roles()],
+            "grip": round(self.grip, 3),
+            "command": {
+                "armed_mode": self.commands.armed_mode,
+                "candidate": self.commands.candidate,
+                "progress": round(self.commands.progress(now), 2),
+                "blocked": self.commands.blocked,
+                "hold_s": self.commands.last_hold_s,
+                "armed_bindings": armed_bindings(bindings, self.roles()),
+            },
             "finger_map": self.finger_map,
             "debounce_ms": self.debounce_ms,
             "bindings": bindings,
