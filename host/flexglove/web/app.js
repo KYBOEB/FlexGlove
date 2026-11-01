@@ -115,6 +115,7 @@
     renderChannelTable(chans, map);
     renderSignalsToolbar();
     renderProtoChannels();
+    renderPipeline();
 
     // настройки
     $("#srcDot").className = "dot" + (connected ? " ok" : src.kind ? " wait" : "");
@@ -422,6 +423,49 @@
       else await api("/api/recording/start", { method: "POST" });
     } catch (err) { toast(err.message, true); }
   });
+  // фильтрация: пресеты конвейера и свой JSON (dsp, этап 3)
+  let PIPE = { presets: [], filters: [] }, pipeKey = "";
+  async function loadPipelines() {
+    try { PIPE = await api("/api/pipelines"); } catch (e) { return; }
+    $("#pipePreset").innerHTML = PIPE.presets.map((p) => `<option value="${p.id}">${p.title}</option>`).join("") +
+      `<option value="custom">Свой конвейер (JSON)…</option>`;
+    $("#pipeTypes").textContent = PIPE.filters.join(", ");
+    pipeKey = "";
+  }
+  function renderPipeline() {
+    const cur = S.pipeline || {}, key = JSON.stringify(cur);
+    const mp = $("#motionPill"); mp.textContent = S.motion ? "движение" : "покой"; mp.className = "pill" + (S.motion ? " motion" : "");
+    if (key === pipeKey || !PIPE.presets.length) return;
+    pipeKey = key;
+    const sel = $("#pipePreset");
+    if (document.activeElement !== sel) sel.value = cur.preset;
+    showPipeHint(sel.value);
+    if (cur.preset === "custom" && document.activeElement !== $("#pipeJson")) $("#pipeJson").value = JSON.stringify(cur.config);
+  }
+  function showPipeHint(id) {
+    const p = PIPE.presets.find((x) => x.id === id);
+    $("#pipeHint").textContent = p ? p.hint : "Свой конвейер: опишите блоки и нажмите «Применить».";
+    $("#pipeCustom").hidden = id !== "custom";
+    $("#pipeApply").hidden = id !== "custom";
+    if (id === "custom" && !$("#pipeJson").value) $("#pipeJson").value = JSON.stringify((S.pipeline || {}).config || []);
+  }
+  async function applyPipeline(preset, config) {
+    try {
+      const r = await api("/api/pipeline", { method: "POST", body: { preset, config } });
+      $("#pipeJson").classList.remove("bad");
+      toast(`Фильтрация: ${r.title}`); chart.clear();
+    } catch (e) { $("#pipeJson").classList.add("bad"); toast(e.message, true); }
+  }
+  $("#pipePreset").addEventListener("change", (e) => {
+    showPipeHint(e.target.value);
+    if (e.target.value !== "custom") applyPipeline(e.target.value);
+  });
+  $("#pipeApply").addEventListener("click", () => {
+    let cfg;
+    try { cfg = JSON.parse($("#pipeJson").value); } catch (e) { $("#pipeJson").classList.add("bad"); return toast("Ошибка JSON: " + e.message, true); }
+    applyPipeline("custom", cfg);
+  });
+
   // запись по протоколу этапа 2: 5 с покой → 5 × (сгиб 2 с / разгиб 2 с) → 5 с покой
   const PROTO = [["rest", 5]].concat(...Array.from({ length: 5 }, () => [["bend", 2], ["release", 2]]), [["rest", 5]]);
   let protoTimer = null;
@@ -501,6 +545,7 @@
   (async function init() {
     showTab();
     try { META = await api("/api/meta"); $("#ver").textContent = "v" + META.version; } catch (e) { /* сервер стартует */ }
+    await loadPipelines();
     connectWS();
   })();
 })();

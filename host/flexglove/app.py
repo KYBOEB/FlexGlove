@@ -14,6 +14,8 @@ from pydantic import BaseModel, Field
 
 from . import __version__
 from .actions import ACTIONS, catalog
+from .dsp import presets as dsp_presets
+from .dsp.filters import FILTERS
 from .engine import FINGERS, Engine
 from .sources import BleSource, MockSource, ReplaySource, SerialSource, Source, list_serial_ports, scan_ble
 from .storage import Storage
@@ -50,6 +52,11 @@ class SettingsRequest(BaseModel):
     finger_map: list[str] | None = None
     debounce_ms: int | None = Field(default=None, ge=0, le=2000)
     channel_roles: list[RoleModel] | None = Field(default=None, max_length=8)
+
+
+class PipelineRequest(BaseModel):
+    preset: str                                  # basic | one_euro | smooth | custom
+    config: list[dict] | None = Field(default=None, max_length=16)   # для custom
 
 
 class MockRequest(BaseModel):
@@ -243,6 +250,20 @@ def create_app(db_path: Path | str = DEFAULT_DB, demo: bool = False) -> FastAPI:
         engine.set_settings(req.finger_map, req.debounce_ms, roles)
         return {"finger_map": engine.finger_map, "debounce_ms": engine.debounce_ms,
                 "channel_roles": [r.as_dict() for r in engine.roles()]}
+
+    # ---------- фильтрация (dsp) ----------
+    @app.get("/api/pipelines")
+    async def pipelines():
+        return {"presets": dsp_presets.catalog(), "filters": sorted(FILTERS),
+                "current": engine.snapshot()["pipeline"]}
+
+    @app.post("/api/pipeline")
+    async def set_pipeline(req: PipelineRequest):
+        try:
+            engine.set_pipeline(req.preset, req.config)
+        except ValueError as exc:
+            raise HTTPException(400, str(exc)) from exc
+        return engine.snapshot()["pipeline"]
 
     @app.post("/api/actions/{action_id}/toggle")
     async def toggle(action_id: str):
