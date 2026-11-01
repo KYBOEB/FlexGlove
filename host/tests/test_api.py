@@ -53,3 +53,16 @@ def test_replay_and_recording(tmp_path):
         assert any(f["name"] == name for f in c.get("/api/recordings").json())
         assert c.get(f"/api/recordings/{name}").text.startswith("﻿Time (s);S1 (ADC);S2 (ADC)")
         assert c.post("/api/connect", json={"kind": "replay", "text": "nothing"}).status_code == 400
+
+
+def test_channel_roles_api(tmp_path):
+    app = create_app(tmp_path / "t.db", demo=True)
+    with TestClient(app) as c:
+        wait(c, lambda s: s["n_channels"] == 5)
+        st = c.get("/api/state").json()
+        assert st["roles"][-1] == {"grip": False, "cmd": True} and st["roles"][0] == {"grip": True, "cmd": True}
+        roles = [{"grip": i < 4, "cmd": i == 0 or i == 4} for i in range(5)]
+        r = c.post("/api/settings", json={"channel_roles": roles})
+        assert r.status_code == 200 and r.json()["channel_roles"] == roles
+        st = c.get("/api/state").json()
+        assert st["roles"] == roles and "armed_bindings" in st["command"]

@@ -17,8 +17,11 @@ from pathlib import Path
 from typing import Any
 
 from .actions import ACTIONS
+from .dsp.recognizers import CommandRecognizer, Role, Sample, armed_bindings, normalize_roles
 from .control import LINK_TIMEOUT_S, GripController
-from .parser import Frame, describe_raw, parse_message
+from .parser import IMU_FIELDS, Frame, describe_raw, parse_message
+from .dsp import presets
+from .dsp.segmentation import HandSegmenter
 from .processing import CalibrationCapture, ChannelProcessor
 from .recording import Recorder
 from .storage import Storage
@@ -29,6 +32,8 @@ DEFAULT_DEBOUNCE_MS = 200
 BROADCAST_HZ = 30
 TICK_S = 0.02
 MAX_CHANNELS = 8
+MIN_RATE_HZ = 20.0          # ниже — предупреждение: управление станет рывками (прошивка шлёт 50 Гц)
+WARN_GRACE_S = 2.5          # первые секунды после подключения не предупреждаем (частота ещё набирается)
 
 
 class Engine:
@@ -46,7 +51,16 @@ class Engine:
         self.tag_order: list[int] = []     # метки каналов в порядке номеров
         self.bits: tuple[int, ...] = ()
         self.combo_since = 0.0
-        self.committed: str | None = None
+        self.commands = CommandRecognizer()        # D-21: роли пальцев, удержание, защита от сжатия
+        self._stored_roles: list | None = storage.get("channel_roles")
+        self.grip = 0.0                            # степень сжатия кисти по пальцам сжатия
+        self.segmenter = HandSegmenter()           # покой / движение руки (dsp/segmentation.py)
+        self.pipeline_setting: dict[str, Any] = storage.get("pipeline", {"preset": presets.DEFAULT_PRESET})
+        try:
+            self.pipeline_config = presets.resolve(self.pipeline_setting.get("preset", ""), self.pipeline_setting.get("config"))
+        except ValueError:                         # испорченная настройка — не ломаем запуск
+            self.pipeline_setting = {"preset": presets.DEFAULT_PRESET}
+            self.pipeline_config = presets.resolve(presets.DEFAULT_PRESET)
         self.capture: CalibrationCapture | None = None
         self.last_calibration: dict[str, Any] | None = None
 
@@ -55,12 +69,16 @@ class Engine:
         self.events: deque[dict] = deque(maxlen=40)
 
         self.source_info: dict[str, Any] = {"kind": None, "name": None, "connected": False, "message": "Не подключено"}
+        self.connected_since = 0.0
         self._msg_times: deque[float] = deque(maxlen=600)
         self.msg_total = 0
         self.unparsed_total = 0
         self.last_raw = ""
         self.last_format = ""
         self.last_data_time = 0.0
+        self.imu: tuple[float, ...] | None = None   # последний отсчёт MPU6050 (протокол v0.3)
+        self.imu_time = 0.0
+        self.imu_total = 0
 
         self._subscribers: set[asyncio.Queue] = set()
         self._dirty = True
@@ -116,12 +134,16 @@ class Engine:
                     if tag not in self.tag_order and len(self.tag_order) < MAX_CHANNELS:
                         # новый сенсор: вставляем канал на место по порядку меток
                         self.tag_order = sorted(self.tag_order + [tag])
-                        self.channels.insert(self.tag_order.index(tag), ChannelProcessor())
+                        self.channels.insert(self.tag_order.index(tag), ChannelProcessor(self.pipeline_config))
                         self._load_calibration()
                     if tag in self.tag_order:
                         self._update_channel(self.tag_order.index(tag), v, now)
+            if frame.imu is not None:
+                self.imu, self.imu_time = frame.imu, now
+                self.imu_total += 1
+            self.segmenter.update([c.filtered for c in self.channels], now)
             if self.recorder.active:
-                self.recorder.write([c.raw for c in self.channels], now)
+                self.recorder.write([c.raw for c in self.channels], now, frame.imu)
             self._set_bits(tuple(c.bit for c in self.channels), now)
         else:
             self._set_mode("bits")
@@ -134,11 +156,12 @@ class Engine:
             self.channels = []
             self.tag_order = []
             self.bits = ()
-            self.committed = None
+            self.commands.reset()
+            self.segmenter.reset()
 
     def _ensure_channels(self, n: int) -> None:
         while len(self.channels) < min(n, MAX_CHANNELS):
-            ch = ChannelProcessor()
+            ch = ChannelProcessor(self.pipeline_config)
             cal = self.storage.get("calibration", {})
             i = len(self.channels)
             if i < len(cal.get("open", [])) and i < len(cal.get("fist", [])):
@@ -157,10 +180,14 @@ class Engine:
             self.combo_since = now
 
     def on_source_status(self, **info: Any) -> None:
+        was = self.source_info.get("connected")
         self.source_info.update(info)
+        if self.source_info.get("connected") and not was:
+            self.connected_since = time.monotonic()
         if not self.source_info.get("connected"):
             self._set_mode("none")
             self.prefer_values = False
+            self.imu = None
         self._dirty = True
 
     # ================= такт: жесты, контроллер, калибровка =================
@@ -175,27 +202,31 @@ class Engine:
         msg = self.controller.set_link(bool(link_ok))
         if msg:
             self._event("link", msg, source="system")
-        # 2. захват: желаемое сжатие = средний сгиб пальцев с данными
-        live = [self._bend(i, now) for i in range(len(self.channels))]
+        # 2. захват: желаемое сжатие = средний сгиб пальцев с ролью «сжатие» (D-21)
+        roles = self.roles()
+        live = [self._bend(i, now) for i in range(len(self.channels)) if roles[i].grip]
         live = [b for b in live if b is not None]
+        self.grip = sum(live) / len(live) if live else 0.0
         before = self.controller.command
-        self.controller.step(sum(live) / len(live) if live else 0.0, now)
+        self.controller.step(self.grip, now)
         if abs(self.controller.command - before) > 1e-4:
             self._dirty = True
         # 3. калибровка
         if self.capture is not None and self.capture.done(now):
             self._finish_calibration()
-        # 4. жест-комбинация: фиксируется после удержания debounce_ms
-        if not self.bits:
-            return
-        combo = "".join(str(b) for b in self.bits)
-        if combo == self.committed or (now - self.combo_since) * 1000 < self.debounce_ms:
-            return
-        self.committed = combo
-        self._dirty = True
-        action_id = self.storage.bindings().get(combo)
-        if action_id in ACTIONS:
-            self.toggle_action(action_id, source="gesture", combo=combo)
+        # 4. жест-команда (dsp/recognizers/combo.py): роли пальцев, удержание, защита от сопутствующего сжатия
+        self.commands.roles = roles
+        armed = self.controller.armed and self.controller.link_ok
+        sample = Sample(t=now, bits=self.bits, grip=self.grip,
+                        context={"armed": armed, "bindings": self.storage.bindings(), "debounce_s": self.debounce_ms / 1000})
+        for ev in self.commands.update(sample):
+            self._dirty = True
+            combo = ev.data["combo"]
+            if ev.kind == "command_ignored":
+                self._event("ignored", f"Жест {combo} не выполнен: пальцы команд двигались вместе со сжатием",
+                            source="system", combo=combo)
+            elif ev.data["action"] in ACTIONS:
+                self.toggle_action(ev.data["action"], source="gesture", combo=combo)
 
     def _bend(self, i: int, now: float) -> float | None:
         if self.mode == "bits":
@@ -273,7 +304,7 @@ class Engine:
 
     # ================= запись =================
     def start_recording(self) -> str:
-        path = self.recorder.start(len(self.channels) or 5)
+        path = self.recorder.start(len(self.channels) or 5, imu=self._imu_live(time.monotonic()))
         self._event("record", f"Запись начата: {path.name}", source="manual")
         return path.name
 
@@ -289,7 +320,38 @@ class Engine:
         self.storage.set_binding(combo, action_id)
         self._dirty = True
 
-    def set_settings(self, finger_map: list[str] | None = None, debounce_ms: int | None = None) -> None:
+    @property
+    def committed(self) -> str | None:
+        """Последняя комбинация, по которой принято решение (для интерфейса и тестов)."""
+        return self.commands.committed
+
+    def roles(self) -> list[Role]:
+        """Роли каналов (сжатие / команды) для текущего числа каналов."""
+        return normalize_roles(self._stored_roles, max(len(self.channels), len(self.bits)))
+
+    def set_pipeline(self, preset: str, config: list[dict] | None = None) -> list[dict]:
+        """Выбрать конвейер фильтров (пресет или "custom" + описание JSON) для всех каналов.
+        Неверное описание — ValueError (настройка не меняется). Калибровка сохраняется."""
+        cfg = presets.resolve(preset, config)
+        self.pipeline_setting = {"preset": preset, "config": cfg} if preset == "custom" else {"preset": preset}
+        self.pipeline_config = cfg
+        self.storage.put("pipeline", self.pipeline_setting)
+        for ch in self.channels:
+            ch.set_pipeline(cfg)
+        self._event("pipeline", f"Фильтрация: {self.pipeline_title()}", source="manual")
+        return cfg
+
+    def pipeline_title(self) -> str:
+        preset = self.pipeline_setting.get("preset")
+        return presets.PRESETS[preset]["title"] if preset in presets.PRESETS else "свой конвейер"
+
+    def set_settings(self, finger_map: list[str] | None = None, debounce_ms: int | None = None,
+                     channel_roles: list[dict] | None = None) -> None:
+        if channel_roles is not None:
+            current = [r.as_dict() for r in normalize_roles(self._stored_roles, max(len(channel_roles), 8))]
+            current[: len(channel_roles)] = [{"grip": bool(r.get("grip")), "cmd": bool(r.get("cmd"))} for r in channel_roles]
+            self._stored_roles = current
+            self.storage.put("channel_roles", current)
         if finger_map is not None:
             self.finger_map = finger_map
             self.storage.put("finger_map", finger_map)
@@ -299,9 +361,36 @@ class Engine:
         self._dirty = True
 
     # ================= состояние для интерфейса =================
-    def rate(self) -> float:
-        now = time.monotonic()
+    def rate(self, now: float | None = None) -> float:
+        now = time.monotonic() if now is None else now
         return round(sum(1 for t in self._msg_times if now - t <= 2.0) / 2.0, 1)
+
+    def warnings(self, now: float | None = None) -> list[str]:
+        """Предупреждения о качестве потока для «Пульта» и «Отладки потока»."""
+        now = time.monotonic() if now is None else now
+        if not self.source_info.get("connected") or self.source_info.get("kind") == "replay":
+            return []
+        if now - self.connected_since < WARN_GRACE_S:
+            return []
+        out = []
+        rate = self.rate(now)
+        if self.msg_total == 0 or now - self.last_data_time > 1.0:
+            out.append("Данные не приходят больше 1 с. Проверьте питание перчатки; если поток идёт только при движении "
+                       "пальцев — прошивка шлёт значения лишь при изменении, нужна непрерывная отправка 50 Гц.")
+        elif rate < MIN_RATE_HZ:
+            out.append(f"Частота потока {rate:g} сообщ./с — меньше {MIN_RATE_HZ:g}. Захват будет двигаться рывками. "
+                       "Ожидается 50 Гц непрерывно; возможно, прошивка шлёт только изменения или мешают помехи BLE.")
+        if self.mode == "values":
+            for i, ch in enumerate(self.channels):
+                if ch.stale(now) and ch.count:
+                    out.append(f"S{i + 1}: канал молчит больше 1 с (нет данных по этому сенсору).")
+                elif ch.flat(now):
+                    out.append(f"S{i + 1}: значение {ch.raw:g} не меняется 3 с. Живой сенсор всегда немного шумит — "
+                               "проверьте провод и резистор делителя (или прошивка шлёт только изменения).")
+        return out
+
+    def _imu_live(self, now: float) -> bool:
+        return self.imu is not None and now - self.imu_time <= 1.0
 
     def snapshot(self) -> dict[str, Any]:
         now = time.monotonic()
@@ -326,7 +415,20 @@ class Engine:
             "n_channels": n,
             "channels": channels,
             "combo": "".join(str(b) for b in self.bits) if self.bits else None,
-            "committed": self.committed,
+            "committed": self.commands.committed,
+            "roles": [r.as_dict() for r in self.roles()],
+            "grip": round(self.grip, 3),
+            "motion": self.segmenter.moving,
+            "pipeline": {"preset": self.pipeline_setting.get("preset"), "title": self.pipeline_title(),
+                         "config": self.pipeline_config},
+            "command": {
+                "armed_mode": self.commands.armed_mode,
+                "candidate": self.commands.candidate,
+                "progress": round(self.commands.progress(now), 2),
+                "blocked": self.commands.blocked,
+                "hold_s": self.commands.last_hold_s,
+                "armed_bindings": armed_bindings(bindings, self.roles()),
+            },
             "finger_map": self.finger_map,
             "debounce_ms": self.debounce_ms,
             "bindings": bindings,
@@ -340,6 +442,9 @@ class Engine:
             "events": list(self.events)[:20],
             "stats": {"rate": self.rate(), "total": self.msg_total, "unparsed": self.unparsed_total,
                       "last_raw": self.last_raw, "format": self.last_format},
+            "warnings": self.warnings(now),
+            "imu": ({**dict(zip(IMU_FIELDS, self.imu)), "stale": not self._imu_live(now), "total": self.imu_total}
+                    if self.imu is not None else None),
         }
 
     def subscribe(self) -> asyncio.Queue:

@@ -11,6 +11,10 @@
     4 байта с нулевой старшей половиной — одно значение int32 LE (setValue(int))
     бинарный пакет протокола v0.1 — см. docs/protocol.md
 
+Значения + IMU (протокол v0.3, kind="values", поле imu):
+    "213;300|12;-4;998;5;-12;3" — до «|» гибкие сенсоры, после — MPU6050: ax;ay;az (мг), gx;gy;gz (0,1 °/с).
+    Ровно одна «|» и ровно 6 чисел после неё; иначе «|» — просто разделитель значений (как в v0.2).
+
 Значения с метками каналов (kind="tagged") — когда каждый сенсор шлёт свою строку:
     "S1:213", "ch2=215", "A0: 210", "3:220", "S1:213 S2:215"
     Метка — номер; приложение упорядочивает встреченные метки и назначает каналы по порядку.
@@ -28,6 +32,7 @@ import struct
 from dataclasses import dataclass, field
 
 MAX_CHANNELS = 8
+IMU_FIELDS = ("ax", "ay", "az", "gx", "gy", "gz")   # мг, мг, мг, 0,1 °/с × 3 (docs/protocol.md, v0.3)
 
 _NUM = r"-?\d+(?:\.\d+)?"
 _TAG_RE = re.compile(r"([A-Za-zА-Яа-я_]*)\s*(\d{1,2})\s*[:=]\s*(" + _NUM + r")")
@@ -47,6 +52,7 @@ class Frame:
     seq: int | None = None
     t_ms: int | None = None
     fmt: str = ""
+    imu: tuple[float, ...] | None = None        # ax, ay, az, gx, gy, gz (v0.3)
 
     @property
     def n(self) -> int:
@@ -112,6 +118,10 @@ def _parse_text_line(line: str, prefer_values: bool) -> Frame | None:
 
     # подпись перед данными: "bits=01", "adc: 213", "value 213"
     body = re.sub(r"^[A-Za-zА-Яа-я_ ]+[:=]?\s*", "", line)
+
+    imu_frame = _parse_v03(body)
+    if imu_frame is not None:
+        return None if imu_frame is _BROKEN else imu_frame
     tokens = [t for t in _SPLIT_RE.split(body) if t]
     if not tokens or not all(_NUM_RE.fullmatch(t) for t in tokens):
         return None
@@ -124,6 +134,27 @@ def _parse_text_line(line: str, prefer_values: bool) -> Frame | None:
     if len(tokens) > MAX_CHANNELS:
         return None
     return Frame(kind="values", values=tuple(float(t) for t in tokens), fmt="text-values")
+
+
+_BROKEN = Frame(kind="broken")
+
+
+def _numbers(text: str) -> list[float] | None:
+    tokens = [t for t in re.split(r"[;,\s\t]+", text) if t]
+    if not tokens or not all(_NUM_RE.fullmatch(t) for t in tokens):
+        return None
+    return [float(t) for t in tokens]
+
+
+def _parse_v03(body: str) -> Frame | None:
+    """Протокол v0.3: "гибкие;…|ax;ay;az;gx;gy;gz". None — это не v0.3 (разбираем как раньше)."""
+    if body.count("|") != 1 or not re.search(r"[;,\s\t]", body.strip()):
+        return None                     # "213|215" — «|» как разделитель значений (v0.2)
+    left, right = body.split("|")
+    flex, imu = _numbers(left), _numbers(right)
+    if flex is None or imu is None or len(imu) != len(IMU_FIELDS) or len(flex) > MAX_CHANNELS:
+        return _BROKEN                  # обрезанная или испорченная строка v0.3 — не превращаем IMU в каналы
+    return Frame(kind="values", values=tuple(flex), imu=tuple(imu), fmt="text-values+imu")
 
 
 def parse_message(data: bytes | bytearray | str, prefer_values: bool = False) -> list[Frame]:

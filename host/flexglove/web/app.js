@@ -78,6 +78,11 @@
     $("#connText").textContent = connected ? `${src.name || "Устройство"} подключено` : (src.message || "Не подключено");
     $("#connRate").textContent = connected ? `${S.stats.rate} сообщ./с` : "";
     $("#noDeviceBanner").hidden = connected;
+    const warns = S.warnings || [];
+    const wbox = $("#streamWarn");
+    const whtml = warns.map((w) => `<div>⚠ ${w}</div>`).join("");
+    if (wbox.innerHTML !== whtml) wbox.innerHTML = whtml;
+    wbox.hidden = !warns.length;
 
     // рука
     const bends = bendsByFinger(chans.map((c) => (c.stale ? 0 : c.bend)), map);
@@ -95,6 +100,7 @@
     $("#limitMark").style.left = pct(c.max_close);
     renderScene(c, S.actions.light);
     renderToggles();
+    renderCommandStatus(map);
     renderLog();
 
     const isMock = src.kind === "mock" && connected;
@@ -108,6 +114,8 @@
     }
     renderChannelTable(chans, map);
     renderSignalsToolbar();
+    renderProtoChannels();
+    renderPipeline();
 
     // настройки
     $("#srcDot").className = "dot" + (connected ? " ok" : src.kind ? " wait" : "");
@@ -119,7 +127,12 @@
     $("#dbgFormat").textContent = `${S.mode} · ${S.stats.format || "—"}`;
     $("#dbgRaw").textContent = S.stats.last_raw || "—";
     $("#dbgN").textContent = n;
-    renderFingerMap(Math.max(n, 5), map);
+    $("#dbgWarn").textContent = warns.length ? warns.join(" · ") : "нет";
+    const imu = S.imu;
+    $("#dbgImu").textContent = !imu ? "нет данных (протокол v0.2)"
+      : `a: ${imu.ax}; ${imu.ay}; ${imu.az} мг · g: ${(imu.gx / 10).toFixed(1)}; ${(imu.gy / 10).toFixed(1)}; ${(imu.gz / 10).toFixed(1)} °/с` +
+        (imu.stale ? " · устарело" : "");
+    renderFingerMap(Math.max(n, 5), map, S.roles || []);
     renderBindings(n, map);
     const deb = $("#debounce");
     if (document.activeElement !== deb) deb.value = S.debounce_ms;
@@ -166,6 +179,24 @@
       const html = comboOf[id] ? `<span class="chip">${comboOf[id]}</span>` : `<span class="chip none">нет жеста</span>`;
       const tb = b.querySelector(".t-bind"); if (tb.innerHTML !== html) tb.innerHTML = html;
     });
+  }
+
+  function renderCommandStatus(map) {
+    const cs = S.command || {}, roles = S.roles || [], box = $("#cmdStatus");
+    const pure = roles.map((r, i) => (r.cmd && !r.grip ? i : -1)).filter((i) => i >= 0);
+    const armed = cs.armed_mode;
+    let text;
+    if (!S.n_channels) text = "";
+    else if (!armed) text = "Управление не активно: жесты — по всем пальцам команд.";
+    else if (!pure.length) text = "Управление активно. Жестовых команд нет: все пальцы ведут захват (снимите ARM кнопкой).";
+    else {
+      const items = Object.entries(cs.armed_bindings || {}).map(([combo, a]) => `${bentNames(combo, map)} → ${act(a).title}`);
+      text = `Управление активно. Команды удержанием ${cs.hold_s || 1} с: ${items.length ? items.join("; ") : "нет привязок"}.`;
+    }
+    if (cs.blocked) text = "Жест не выполнен: пальцы команд двигались вместе со сжатием.";
+    $("#cmdText").textContent = text;
+    box.classList.toggle("blocked", !!cs.blocked);
+    $("#cmdHoldBar").style.width = pct(cs.blocked ? 0 : cs.progress);
   }
 
   function renderLog() {
@@ -223,17 +254,34 @@
       : S.last_calibration ? `Откалибровано каналов: ${S.last_calibration.valid_channels} из ${S.n_channels}` : (calOk ? "" : "нужен поток значений АЦП");
   }
 
-  function renderFingerMap(n, map) {
-    const key = n + "|" + map.join();
+  function renderFingerMap(n, map, roles) {
+    const shown = S.n_channels || n;
+    const key = shown + "|" + map.join() + "|" + JSON.stringify(roles);
     if (key === mapKey) return;
     mapKey = key;
     const opts = (sel) => META.fingers.map((f) => `<option value="${f}" ${f === sel ? "selected" : ""}>${fname(f)}</option>`).join("");
-    $("#fingerMap").innerHTML = Array.from({ length: n }, (_, i) =>
-      `<label><span><span class="swatch" style="background:${CHANNEL_COLORS[i]}"></span>Канал S${i + 1}</span><select data-ch="${i}">${opts(map[i])}</select></label>`).join("");
+    const role = (i) => roles[i] || { grip: true, cmd: true };
+    $("#fingerMap").innerHTML = Array.from({ length: shown }, (_, i) =>
+      `<div class="fm-row"><span><span class="swatch" style="background:${CHANNEL_COLORS[i]}"></span>Канал S${i + 1}</span>
+        <select data-ch="${i}">${opts(map[i])}</select>
+        <label class="check"><input type="checkbox" data-role="grip" data-ch="${i}" ${role(i).grip ? "checked" : ""}> сжатие</label>
+        <label class="check"><input type="checkbox" data-role="cmd" data-ch="${i}" ${role(i).cmd ? "checked" : ""}> команды</label></div>`).join("");
+    const r = roles.slice(0, shown);
+    const warn = !r.length ? "" : !r.some((x) => x.grip) ? "Нет ни одного пальца сжатия — захват не будет следовать за рукой."
+      : !r.some((x) => x.cmd && !x.grip) ? "Нет пальцев «только команды» — пока управление активно, жесты не работают (ARM снимается кнопкой)." : "";
+    $("#rolesWarn").textContent = warn; $("#rolesWarn").hidden = !warn;
+  }
+
+  function armedLabel(combo) {
+    const a = S.bindings[combo];
+    if (!a) return "";
+    const ab = (S.command || {}).armed_bindings || {};
+    const ok = Object.entries(ab).some(([proj, act_]) => act_ === a && [...proj].every((ch, i) => ch === "0" || combo[i] === "1"));
+    return `<div class="bc-armed ${ok ? "on" : ""}">${ok ? "✓ работает при ARM" : "при ARM — нет"}</div>`;
   }
 
   function renderBindings(n, map) {
-    const key = JSON.stringify([n, map, S.bindings, META.actions.length]);
+    const key = JSON.stringify([n, map, S.bindings, META.actions.length, (S.command || {}).armed_bindings]);
     if (key !== bindKey) {
       bindKey = key;
       const opts = (sel) => `<option value="">— нет команды —</option>` +
@@ -243,7 +291,7 @@
         const rest = !c.includes("1");
         return `<div class="bind-card ${S.bindings[c] ? "bound" : ""}" data-combo="${c}"><svg></svg>
           <div class="bc-combo">${c}</div><div class="small muted">${bentNames(c, map)}</div>
-          ${rest ? `<div class="bc-rest">покой — без команды</div>` : `<select data-combo="${c}">${opts(S.bindings[c])}</select>`}</div>`;
+          ${rest ? `<div class="bc-rest">покой — без команды</div>` : `<select data-combo="${c}">${opts(S.bindings[c])}</select>${armedLabel(c)}`}</div>`;
       }).join("") : `<p class="muted">Подключите перчатку или демо — появятся все комбинации для числа каналов.</p>`;
       $$("#bindGrid .bind-card").forEach((card) => {
         const hv = new HandView(card.querySelector("svg"), { static: true });
@@ -277,6 +325,10 @@
       if (t.matches("select[data-combo]")) {
         await api("/api/bindings", { method: "POST", body: { combo: t.dataset.combo, action_id: t.value || null } });
         toast(t.value ? `Жест ${t.dataset.combo} → ${act(t.value).title}` : `Привязка ${t.dataset.combo} снята`);
+      } else if (t.matches("input[data-role]")) {
+        const roles = (S.roles || []).map((r) => ({ ...r }));
+        roles[+t.dataset.ch][t.dataset.role] = t.checked;
+        await api("/api/settings", { method: "POST", body: { channel_roles: roles } });
       } else if (t.matches("select[data-ch]")) {
         const map = [...S.finger_map];
         map[+t.dataset.ch] = t.value;
@@ -354,7 +406,7 @@
   });
 
   $("#mockStart").addEventListener("click", async () => {
-    try { await api("/api/connect", { method: "POST", body: { kind: "mock" } }); chart.clear(); toast("Демо-режим включён"); location.hash = "#control"; }
+    try { await api("/api/connect", { method: "POST", body: { kind: "mock", n_channels: +$("#mockN").value } }); chart.clear(); toast("Демо-режим включён"); location.hash = "#control"; }
     catch (err) { toast(err.message, true); }
   });
   $("#disconnectBtn").addEventListener("click", () => api("/api/disconnect", { method: "POST" }).catch((e) => toast(e.message, true)));
@@ -371,6 +423,102 @@
       else await api("/api/recording/start", { method: "POST" });
     } catch (err) { toast(err.message, true); }
   });
+  // фильтрация: пресеты конвейера и свой JSON (dsp, этап 3)
+  let PIPE = { presets: [], filters: [] }, pipeKey = "";
+  async function loadPipelines() {
+    try { PIPE = await api("/api/pipelines"); } catch (e) { return; }
+    $("#pipePreset").innerHTML = PIPE.presets.map((p) => `<option value="${p.id}">${p.title}</option>`).join("") +
+      `<option value="custom">Свой конвейер (JSON)…</option>`;
+    $("#pipeTypes").textContent = PIPE.filters.join(", ");
+    pipeKey = "";
+  }
+  function renderPipeline() {
+    const cur = S.pipeline || {}, key = JSON.stringify(cur);
+    const mp = $("#motionPill"); mp.textContent = S.motion ? "движение" : "покой"; mp.className = "pill" + (S.motion ? " motion" : "");
+    if (key === pipeKey || !PIPE.presets.length) return;
+    pipeKey = key;
+    const sel = $("#pipePreset");
+    if (document.activeElement !== sel) sel.value = cur.preset;
+    showPipeHint(sel.value);
+    if (cur.preset === "custom" && document.activeElement !== $("#pipeJson")) $("#pipeJson").value = JSON.stringify(cur.config);
+  }
+  function showPipeHint(id) {
+    const p = PIPE.presets.find((x) => x.id === id);
+    $("#pipeHint").textContent = p ? p.hint : "Свой конвейер: опишите блоки и нажмите «Применить».";
+    $("#pipeCustom").hidden = id !== "custom";
+    $("#pipeApply").hidden = id !== "custom";
+    if (id === "custom" && !$("#pipeJson").value) $("#pipeJson").value = JSON.stringify((S.pipeline || {}).config || []);
+  }
+  async function applyPipeline(preset, config) {
+    try {
+      const r = await api("/api/pipeline", { method: "POST", body: { preset, config } });
+      $("#pipeJson").classList.remove("bad");
+      toast(`Фильтрация: ${r.title}`); chart.clear();
+    } catch (e) { $("#pipeJson").classList.add("bad"); toast(e.message, true); }
+  }
+  $("#pipePreset").addEventListener("change", (e) => {
+    showPipeHint(e.target.value);
+    if (e.target.value !== "custom") applyPipeline(e.target.value);
+  });
+  $("#pipeApply").addEventListener("click", () => {
+    let cfg;
+    try { cfg = JSON.parse($("#pipeJson").value); } catch (e) { $("#pipeJson").classList.add("bad"); return toast("Ошибка JSON: " + e.message, true); }
+    applyPipeline("custom", cfg);
+  });
+
+  // запись по протоколу этапа 2: 5 с покой → 5 × (сгиб 2 с / разгиб 2 с) → 5 с покой
+  const PROTO = [["rest", 5]].concat(...Array.from({ length: 5 }, () => [["bend", 2], ["release", 2]]), [["rest", 5]]);
+  let protoTimer = null;
+  function renderProtoChannels() {
+    const sel = $("#protoCh"), n = S ? S.n_channels : 0;
+    const key = n + "|" + (S ? S.finger_map.join() : "");
+    if (sel.dataset.key === key) return;
+    sel.dataset.key = key;
+    sel.innerHTML = Array.from({ length: n }, (_, i) => `<option value="${i}">S${i + 1} · ${fname(S.finger_map[i])}</option>`).join("") +
+      (n > 1 ? `<option value="all">все пальцы вместе</option>` : "");
+  }
+  async function protoStop(save) {
+    clearInterval(protoTimer); protoTimer = null;
+    $("#proto").hidden = true;
+    if (S && S.source.kind === "mock") api("/api/mock", { method: "POST", body: { bends: Array(S.n_channels).fill(0) } }).catch(() => {});
+    if (S && S.recording.active) {
+      const r = await api("/api/recording/stop", { method: "POST" }).catch(() => null);
+      if (r) toast(save ? `Запись по протоколу сохранена: data/recordings/${r.file} — разбор: python tools/analyze_recording.py` : `Запись прервана: ${r.file}`, !save);
+      refreshRecordings();
+    }
+  }
+  $("#protoBtn").addEventListener("click", async () => {
+    if (!S || S.mode !== "values") return toast("Нужен поток значений АЦП (подключите перчатку)", true);
+    if (S.recording.active) return toast("Сначала остановите текущую запись", true);
+    const ch = $("#protoCh").value;
+    const who = ch === "all" ? "все пальцы" : `S${+ch + 1} (${fname(S.finger_map[+ch])})`;
+    try { await api("/api/recording/start", { method: "POST" }); } catch (e) { return toast(e.message, true); }
+    const total = PROTO.reduce((a, [, d]) => a + d, 0), t0 = performance.now();
+    let lastPhase = -1;
+    $("#proto").hidden = false;
+    const tick = () => {
+      const el = (performance.now() - t0) / 1000;
+      if (el >= total) return protoStop(true);
+      let acc = 0, i = 0;
+      while (acc + PROTO[i][1] <= el) acc += PROTO[i++][1];
+      const [kind, dur] = PROTO[i], bendNo = Math.floor((i + 1) / 2);
+      $("#protoStep").textContent = `Запись по протоколу · ${who} · шаг ${i + 1} из ${PROTO.length}`;
+      $("#protoCmd").textContent = kind === "rest" ? "Покой — ладонь раскрыта" : kind === "bend" ? `Согнуть ${who} (${bendNo} из 5)` : "Разогнуть";
+      $("#protoCmd").className = "proto-cmd" + (kind === "bend" ? " bend" : "");
+      $("#protoLeft").textContent = Math.ceil(acc + dur - el);
+      $("#protoBar").style.width = pct(el / total);
+      if (i !== lastPhase && S.source.kind === "mock") {        // в демо пальцы сгибаются сами — проверка без перчатки
+        const b = Array(S.n_channels).fill(0);
+        if (kind === "bend") (ch === "all" ? b.fill(1) : (b[+ch] = 1));
+        api("/api/mock", { method: "POST", body: { bends: b } }).catch(() => {});
+        $("#mockAuto").checked = false;
+      }
+      lastPhase = i;
+    };
+    tick(); protoTimer = setInterval(tick, 100);
+  });
+  $("#protoCancel").addEventListener("click", () => protoStop(false));
+
   async function refreshRecordings() {
     try {
       const list = await api("/api/recordings");
@@ -397,6 +545,7 @@
   (async function init() {
     showTab();
     try { META = await api("/api/meta"); $("#ver").textContent = "v" + META.version; } catch (e) { /* сервер стартует */ }
+    await loadPipelines();
     connectWS();
   })();
 })();
