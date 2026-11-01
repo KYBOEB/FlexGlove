@@ -16,6 +16,7 @@ from . import __version__
 from .actions import ACTIONS, catalog
 from .dsp import presets as dsp_presets
 from .dsp.filters import FILTERS
+from .imu import mount_catalog
 from .engine import FINGERS, Engine
 from .sources import BleSource, MockSource, ReplaySource, SerialSource, Source, list_serial_ports, scan_ble
 from .storage import Storage
@@ -52,6 +53,8 @@ class SettingsRequest(BaseModel):
     finger_map: list[str] | None = None
     debounce_ms: int | None = Field(default=None, ge=0, le=2000)
     channel_roles: list[RoleModel] | None = Field(default=None, max_length=8)
+    imu_mount: str | None = None
+    hand: Literal["right", "left"] | None = None
 
 
 class PipelineRequest(BaseModel):
@@ -63,6 +66,9 @@ class MockRequest(BaseModel):
     bits: str | None = Field(default=None, pattern=r"^[01]{1,8}$")
     bends: list[float] | None = None
     auto: bool | None = None
+    roll: float | None = Field(default=None, ge=-180, le=180)     # имитация IMU: целевые углы кисти, °
+    pitch: float | None = Field(default=None, ge=-180, le=180)
+    yaw: float | None = Field(default=None, ge=-180, le=180)
 
 
 class AppState:
@@ -155,7 +161,7 @@ def create_app(db_path: Path | str = DEFAULT_DB, demo: bool = False) -> FastAPI:
 
     @app.get("/api/meta")
     async def meta():
-        return {"actions": catalog(), "fingers": FINGERS, "version": __version__}
+        return {"actions": catalog(), "fingers": FINGERS, "version": __version__, "imu_mounts": mount_catalog()}
 
     # ---------- подключение ----------
     @app.get("/api/ble/scan")
@@ -190,7 +196,9 @@ def create_app(db_path: Path | str = DEFAULT_DB, demo: bool = False) -> FastAPI:
             state.source.set_bends(req.bends)
         if req.auto is not None:
             state.source.set_auto(req.auto)
-        return {"bits": state.source.bits, "auto": state.source.auto}
+        if any(v is not None for v in (req.roll, req.pitch, req.yaw)):
+            state.source.set_angles(req.roll, req.pitch, req.yaw)
+        return {"bits": state.source.bits, "auto": state.source.auto, "angles": state.source.angle_target}
 
     # ---------- калибровка ----------
     @app.post("/api/calibration/{target}")
@@ -247,9 +255,30 @@ def create_app(db_path: Path | str = DEFAULT_DB, demo: bool = False) -> FastAPI:
         if req.finger_map is not None and any(f not in FINGERS for f in req.finger_map):
             raise HTTPException(400, "Неизвестный палец")
         roles = [r.model_dump() for r in req.channel_roles] if req.channel_roles is not None else None
-        engine.set_settings(req.finger_map, req.debounce_ms, roles)
+        try:
+            engine.set_settings(req.finger_map, req.debounce_ms, roles, req.imu_mount, req.hand)
+        except ValueError as exc:
+            raise HTTPException(400, str(exc)) from exc
         return {"finger_map": engine.finger_map, "debounce_ms": engine.debounce_ms,
-                "channel_roles": [r.as_dict() for r in engine.roles()]}
+                "channel_roles": [r.as_dict() for r in engine.roles()],
+                "imu_mount": engine.imu_tracker.mount, "hand": engine.hand}
+
+    # ---------- ориентация (IMU) ----------
+    @app.post("/api/imu/zero")
+    async def imu_zero():
+        try:
+            engine.imu_zero()
+        except RuntimeError as exc:
+            raise HTTPException(409, str(exc)) from exc
+        return engine.snapshot()["orientation"]
+
+    @app.post("/api/imu/calibrate")
+    async def imu_calibrate():
+        try:
+            engine.imu_calibrate()
+        except RuntimeError as exc:
+            raise HTTPException(409, str(exc)) from exc
+        return engine.snapshot()["orientation"]
 
     # ---------- фильтрация (dsp) ----------
     @app.get("/api/pipelines")

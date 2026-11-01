@@ -12,6 +12,8 @@
 """
 from __future__ import annotations
 
+from collections import deque
+
 from .features import FeatureWindow
 
 REST, MOTION = "rest", "motion"
@@ -69,3 +71,37 @@ class HandSegmenter:
     @property
     def moving(self) -> bool:
         return any(d.moving for d in self.channels)
+
+
+class ImuRestDetector:
+    """Покой по IMU: за окно n отсчётов (≈ 0,5 с) разброс (СКО) каждой оси гироскопа < gyro_std_dps
+    и модуль ускорения отличается от 1 g меньше чем на acc_tol_g. Смещение гироскопа на покой не влияет —
+    смотрим разброс, а не среднее. Медленное равномерное вращение (< ~0,5 °/с) от покоя не отличить —
+    это ограничение любого MEMS-гироскопа без внешней опоры."""
+
+    def __init__(self, n: int = 25, gyro_std_dps: float = 0.6, acc_tol_g: float = 0.05):
+        self.n, self.gyro_std, self.acc_tol = n, gyro_std_dps, acc_tol_g
+        self.reset()
+
+    def reset(self) -> None:
+        self._g: deque = deque(maxlen=self.n)
+        self._a_ok: deque = deque(maxlen=self.n)
+        self.state = MOTION
+
+    def update(self, gyro_dps: tuple[float, float, float], acc_g: tuple[float, float, float]) -> str:
+        self._g.append(gyro_dps)
+        self._a_ok.append(abs(sum(c * c for c in acc_g) ** 0.5 - 1.0) < self.acc_tol)
+        if len(self._g) < self.n or not all(self._a_ok):
+            self.state = MOTION if len(self._g) == self.n else self.state
+            return self.state
+        quiet = True
+        for axis in range(3):
+            vals = [g[axis] for g in self._g]
+            m = sum(vals) / len(vals)
+            quiet = quiet and (sum((v - m) ** 2 for v in vals) / len(vals)) ** 0.5 < self.gyro_std
+        self.state = REST if quiet else MOTION
+        return self.state
+
+    @property
+    def at_rest(self) -> bool:
+        return self.state == REST

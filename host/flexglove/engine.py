@@ -22,6 +22,7 @@ from .control import LINK_TIMEOUT_S, GripController
 from .parser import IMU_FIELDS, Frame, describe_raw, parse_message
 from .dsp import presets
 from .dsp.segmentation import HandSegmenter
+from .imu import DEFAULT_MOUNT, MOUNT_PRESETS, ImuTracker
 from .processing import CalibrationCapture, ChannelProcessor
 from .recording import Recorder
 from .storage import Storage
@@ -55,6 +56,9 @@ class Engine:
         self._stored_roles: list | None = storage.get("channel_roles")
         self.grip = 0.0                            # степень сжатия кисти по пальцам сжатия
         self.segmenter = HandSegmenter()           # покой / движение руки (dsp/segmentation.py)
+        mount = storage.get("imu_mount", DEFAULT_MOUNT)
+        self.imu_tracker = ImuTracker(mount if mount in MOUNT_PRESETS else DEFAULT_MOUNT)   # ориентация (imu.py)
+        self.hand: str = storage.get("hand", "right")
         self.pipeline_setting: dict[str, Any] = storage.get("pipeline", {"preset": presets.DEFAULT_PRESET})
         try:
             self.pipeline_config = presets.resolve(self.pipeline_setting.get("preset", ""), self.pipeline_setting.get("config"))
@@ -141,6 +145,7 @@ class Engine:
             if frame.imu is not None:
                 self.imu, self.imu_time = frame.imu, now
                 self.imu_total += 1
+                self._update_orientation(frame.imu, now)
             self.segmenter.update([c.filtered for c in self.channels], now)
             if self.recorder.active:
                 self.recorder.write([c.raw for c in self.channels], now, frame.imu)
@@ -149,6 +154,19 @@ class Engine:
             self._set_mode("bits")
             self._ensure_channels(frame.n)
             self._set_bits(frame.bits or (), now)
+
+    def _update_orientation(self, raw: tuple[float, ...], now: float) -> None:
+        """IMU → ориентация. Первый отсчёт после подключения запускает 2 с калибровки гироскопа и обнуление."""
+        tr = self.imu_tracker
+        if tr.count == 0:
+            tr.start_capture(now, zero_after=True)
+        was_capturing = tr.capture is not None
+        tr.update(raw, now)
+        if was_capturing and tr.capture is None:
+            self._event("imu", tr.message, source="system")
+
+    def _orientation_live(self, now: float) -> bool:
+        return self.imu_tracker.count > 0 and now - self.imu_time <= 0.5
 
     def _set_mode(self, mode: str) -> None:
         if mode != self.mode:
@@ -188,6 +206,7 @@ class Engine:
             self._set_mode("none")
             self.prefer_values = False
             self.imu = None
+            self.imu_tracker.reset()
         self._dirty = True
 
     # ================= такт: жесты, контроллер, калибровка =================
@@ -210,6 +229,12 @@ class Engine:
         before = self.controller.command
         self.controller.step(self.grip, now)
         if abs(self.controller.command - before) > 1e-4:
+            self._dirty = True
+        # 2б. поворот захвата: крен кисти относительно исходной позы (D-25)
+        before_rot = self.controller.rot_command
+        roll = self.imu_tracker.wrist_roll_deg if self._orientation_live(now) and self.imu_tracker.zeroed else None
+        self.controller.step_rotation(roll, now)
+        if abs(self.controller.rot_command - before_rot) > 1e-3:
             self._dirty = True
         # 3. калибровка
         if self.capture is not None and self.capture.done(now):
@@ -341,12 +366,34 @@ class Engine:
         self._event("pipeline", f"Фильтрация: {self.pipeline_title()}", source="manual")
         return cfg
 
+    def imu_zero(self) -> None:
+        if not self.imu_tracker.count:
+            raise RuntimeError("Нет данных IMU — обнулять нечего")
+        self.imu_tracker.set_zero()
+        self._event("imu", "Положение обнулено: текущая поза — исходная", source="manual")
+
+    def imu_calibrate(self) -> None:
+        if not self.imu_tracker.count:
+            raise RuntimeError("Нет данных IMU — калибровать нечего")
+        self.imu_tracker.start_capture(time.monotonic())
+        self._dirty = True
+
     def pipeline_title(self) -> str:
         preset = self.pipeline_setting.get("preset")
         return presets.PRESETS[preset]["title"] if preset in presets.PRESETS else "свой конвейер"
 
     def set_settings(self, finger_map: list[str] | None = None, debounce_ms: int | None = None,
-                     channel_roles: list[dict] | None = None) -> None:
+                     channel_roles: list[dict] | None = None, imu_mount: str | None = None,
+                     hand: str | None = None) -> None:
+        if imu_mount is not None:
+            self.imu_tracker.set_mount(imu_mount)          # ValueError — неизвестный пресет
+            self.storage.put("imu_mount", imu_mount)
+            self.imu_tracker.reset()                       # прежняя поза в других осях бессмысленна
+        if hand is not None:
+            if hand not in ("right", "left"):
+                raise ValueError("hand: right или left")
+            self.hand = hand
+            self.storage.put("hand", hand)
         if channel_roles is not None:
             current = [r.as_dict() for r in normalize_roles(self._stored_roles, max(len(channel_roles), 8))]
             current[: len(channel_roles)] = [{"grip": bool(r.get("grip")), "cmd": bool(r.get("cmd"))} for r in channel_roles]
@@ -419,6 +466,8 @@ class Engine:
             "roles": [r.as_dict() for r in self.roles()],
             "grip": round(self.grip, 3),
             "motion": self.segmenter.moving,
+            "orientation": self.imu_tracker.snapshot(now) if self.imu_tracker.count else None,
+            "hand": self.hand,
             "pipeline": {"preset": self.pipeline_setting.get("preset"), "title": self.pipeline_title(),
                          "config": self.pipeline_config},
             "command": {
@@ -434,7 +483,9 @@ class Engine:
             "bindings": bindings,
             "actions": self.action_state(),
             "controller": {"state": c.state, "target": round(c.target, 3), "command": round(c.command, 3),
-                           "max_close": c.config.max_close, "armed": c.armed, "hold": c.hold, "link": c.link_ok},
+                           "max_close": c.config.max_close, "armed": c.armed, "hold": c.hold, "link": c.link_ok,
+                           "rot_target": round(c.rot_target, 1), "rot_command": round(c.rot_command, 1),
+                           "rot_limit": c.config.rot_limit_deg},
             "calibrating": self.capture.target if self.capture else None,
             "last_calibration": self.last_calibration,
             "recording": {"active": self.recorder.active, "file": self.recorder.path.name if self.recorder.path else None,

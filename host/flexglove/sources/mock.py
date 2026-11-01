@@ -3,12 +3,20 @@
 Сигнал похож на настоящий (по записи с ESP32): значения АЦП около 213 в покое,
 шум с СКО ≈ 3, редкие выбросы, поток 50 Гц, строка "v1;v2;v3;v4;v5".
 При сгибе значение плавно растёт (постоянная времени ≈ 80 мс).
+
+С этапа 4 демо имитирует и MPU6050 (протокол v0.3, строка "v1;…|ax;ay;az;gx;gy;gz"): кисть плавно следует за
+целевыми креном/тангажем/рысканьем (ползунки и клавиши в демо-полосе, в автопереборе — медленное покачивание),
+шум как у MPU6050 (гироскоп ≈ 0,03 °/с, акселерометр ≈ 3 мг), смещение нуля гироскопа ≈ 0,5 °/с,
+квантование как в протоколе (1 мг, 0,1 °/с). Исходная поза — ладонь вниз, оси модуля = оси руки.
 """
 from __future__ import annotations
 
 import asyncio
 import itertools
+import math
 import random
+
+from ..dsp.orientation import q_conj, q_from_euler, q_mul, q_rotate
 
 from .base import Source
 
@@ -17,6 +25,12 @@ BEND_DELTA = [620.0, 760.0, 700.0, 680.0, 560.0]   # прирост АЦП пр�
 NOISE_STD = 3.0
 SPIKE_PROB = 0.01
 TAU_S = 0.08
+
+IMU_GYRO_BIAS_DPS = (0.5, -0.4, 0.3)    # смещение нуля гироскопа, °/с
+IMU_GYRO_NOISE_DPS = 0.03
+IMU_ACC_NOISE_G = 0.003
+IMU_MAX_RATE_DPS = 120.0                # как быстро кисть догоняет цель
+IMU_TAU_S = 0.15
 
 # автоперебор: (сгибы по каналам, длительность, с)
 AUTO_SEQUENCE = [
@@ -35,8 +49,12 @@ AUTO_SEQUENCE = [
 class MockSource(Source):
     kind = "mock"
 
-    def __init__(self, on_raw, on_status, n_channels: int = 5, rate_hz: float = 50.0):
+    def __init__(self, on_raw, on_status, n_channels: int = 5, rate_hz: float = 50.0, imu: bool = True):
         super().__init__(on_raw, on_status)
+        self.imu = imu
+        self.angle_target = [0.0, 0.0, 0.0]       # крен, тангаж, рысканье, °
+        self.angles = [0.0, 0.0, 0.0]
+        self._q_prev = None
         self.n = n_channels
         self.rate_hz = rate_hz
         self.target = [0.0] * n_channels
@@ -60,9 +78,39 @@ class MockSource(Source):
     def set_auto(self, enabled: bool) -> None:
         self.auto = enabled
 
+    def set_angles(self, roll: float | None = None, pitch: float | None = None, yaw: float | None = None) -> None:
+        for i, v in enumerate((roll, pitch, yaw)):
+            if v is not None:
+                self.angle_target[i] = max(-170.0, min(170.0, float(v)))
+
+    def imu_sample(self, t: float, dt: float) -> str:
+        """Один отсчёт MPU6050 в единицах протокола v0.3: ax;ay;az (мг), gx;gy;gz (0,1 °/с)."""
+        target = list(self.angle_target)
+        if self.auto:                                   # медленное покачивание кисти в автопереборе
+            target = [35 * math.sin(2 * math.pi * t / 6), 20 * math.sin(2 * math.pi * t / 9), 15 * math.sin(2 * math.pi * t / 14)]
+        a = dt / (IMU_TAU_S + dt)
+        for i in range(3):
+            step = a * (target[i] - self.angles[i])
+            lim = IMU_MAX_RATE_DPS * dt
+            self.angles[i] += max(-lim, min(lim, step))
+        q = q_from_euler(*self.angles)
+        prev = self._q_prev or q
+        self._q_prev = q
+        d = q_mul(q_conj(prev), q)                      # поворот за шаг в осях кисти
+        if d[0] < 0:
+            d = (-d[0], -d[1], -d[2], -d[3])
+        s = math.sqrt(d[1] ** 2 + d[2] ** 2 + d[3] ** 2)
+        ang = 2 * math.atan2(s, d[0])
+        omega = [0.0, 0.0, 0.0] if s < 1e-12 else [math.degrees(ang / dt) * c / s for c in d[1:]]
+        up = q_rotate(q_conj(q), (0.0, 0.0, 1.0))
+        rnd = self._rng
+        acc = [round(1000 * (u + rnd.gauss(0, IMU_ACC_NOISE_G))) for u in up]
+        gyr = [round(10 * (w + b + rnd.gauss(0, IMU_GYRO_NOISE_DPS))) for w, b in zip(omega, IMU_GYRO_BIAS_DPS)]
+        return ";".join(str(v) for v in acc + gyr)
+
     async def start(self) -> None:
         self.on_status(kind=self.kind, name="Демо-перчатка", connected=True,
-                       message=f"Демо-режим: {self.n} сенсоров, {self.rate_hz:.0f} Гц, данные имитируются")
+                       message=f"Демо-режим: {self.n} сенсоров{' + MPU6050' if self.imu else ''}, {self.rate_hz:.0f} Гц, данные имитируются")
         self._task = asyncio.create_task(self._run())
 
     async def _run(self) -> None:
@@ -70,6 +118,7 @@ class MockSource(Source):
         alpha = period / (TAU_S + period)
         seq = itertools.cycle(AUTO_SEQUENCE)
         step_left = 0.0
+        t_sim = 0.0
         while True:
             if self.auto:
                 step_left -= period
@@ -83,7 +132,11 @@ class MockSource(Source):
                 if self._rng.random() < SPIKE_PROB:
                     v += self._rng.choice([-1, 1]) * self._rng.uniform(15, 30)
                 values.append(str(int(round(v))))
-            self.on_raw(";".join(values) + "\n")
+            line = ";".join(values)
+            if self.imu:
+                line += "|" + self.imu_sample(t_sim, period)
+            t_sim += period
+            self.on_raw(line + "\n")
             await asyncio.sleep(period)
 
     async def stop(self) -> None:
