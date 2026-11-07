@@ -3,15 +3,27 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>FlexGlove — пульт телеуправления</title>
-  <link rel="icon" href="/static/icon.png">
-  <link rel="stylesheet" href="/static/style.css">
+  <title>FlexGlove — перчатка-интерфейс</title>
+  <!-- __V__ сервер заменяет на версию приложения: новая версия — новые адреса файлов, кэш браузера не мешает -->
+  <link rel="icon" href="/static/icon.png?v=__V__">
+  <link rel="stylesheet" href="/static/style.css?v=__V__">
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "/static/vendor/three/three.module.min.js?v=__V__",
+      "three/addons/loaders/GLTFLoader.js": "/static/vendor/three/addons/loaders/GLTFLoader.js?v=__V__",
+      "three/addons/controls/OrbitControls.js": "/static/vendor/three/addons/controls/OrbitControls.js?v=__V__",
+      "/static/vendor/three/addons/utils/BufferGeometryUtils.js": "/static/vendor/three/addons/utils/BufferGeometryUtils.js?v=__V__",
+      "flexglove/handpose": "/static/handpose.js?v=__V__"
+    }
+  }
+  </script>
 </head>
 <body>
 <header class="topbar">
-  <div class="brand"><img src="/static/icon.png" alt="" class="logo"> FlexGlove <span class="ver" id="ver"></span></div>
+  <div class="brand"><img src="/static/icon.png?v=__V__" alt="" class="logo"> FlexGlove <span class="ver" id="ver"></span></div>
   <nav class="tabs">
-    <a href="#control" data-tab="control" class="tab">Пульт</a>
+    <a href="#hand" data-tab="hand" class="tab">Рука</a>
     <a href="#signals" data-tab="signals" class="tab">Сигналы</a>
     <a href="#settings" data-tab="settings" class="tab">Настройки</a>
   </nav>
@@ -23,106 +35,71 @@
 </header>
 
 <main>
-  <!-- ================= ПУЛЬТ ================= -->
-  <section id="tab-control" class="page">
-    <div class="banner" id="noDeviceBanner" hidden>
-      Перчатка не подключена. <a href="#settings">Подключите её</a> или включите демо-режим.
-    </div>
-    <div class="banner warn" id="streamWarn" hidden></div>
-
-    <div class="control-grid">
-      <div class="card hand-card">
-        <h2>Рука оператора</h2>
-        <div class="hand3d" id="hand3d" hidden></div>
-        <div class="hand-wrap" id="hand2d"><svg id="handMain" class="hand"></svg></div>
-        <div class="imu-box" id="imuBox" hidden>
-          <div class="imu-angles"><span>крен <b id="imuRoll">0°</b></span><span>тангаж <b id="imuPitch">0°</b></span><span>рысканье <b id="imuYaw">0°</b></span></div>
-          <div class="row">
-            <button class="small" id="imuZero" title="Текущая поза руки станет исходной (на экране — пальцы вверх)">Обнулить положение</button>
-            <button class="ghost small" id="imuCal" title="2 с замера смещения гироскопа — держите руку неподвижно">Калибровать гироскоп</button>
-          </div>
-          <div class="small" id="imuStatus"></div>
-          <div class="small muted" id="imuDrift"></div>
+  <!-- ================= РУКА (главный экран, D-26) ================= -->
+  <section id="tab-hand" class="page hand-page">
+    <div class="stage">
+      <div class="hand3d" id="hand3d" hidden></div>
+      <div class="hand-wrap stage-2d" id="hand2d"><svg id="handMain" class="hand"></svg></div>
+      <div class="stage-banners">
+        <div class="banner" id="noDeviceBanner" hidden>
+          Перчатка не подключена. <a href="#settings">Подключите её</a> или включите демо-режим.
         </div>
-        <div class="combo-row">
-          <div><span class="muted small">Комбинация</span><div class="combo" id="mainCombo">—</div></div>
+        <div class="banner warn" id="streamWarn" hidden></div>
+      </div>
+      <div class="stage-pose" id="stagePose"></div>
+
+      <div class="demo-bar" id="demoStrip" hidden>
+        <b>Демо</b>
+        <label class="check"><input type="checkbox" id="mockTour"> обзор</label>
+        <label class="check"><input type="checkbox" id="mockAuto"> перебор жестов</label>
+        <span class="demo-sl"><span>наклон пальцев</span><input type="range" id="pitchSlider" min="-85" max="85" value="0"><b id="pitchVal">0°</b></span>
+        <span class="demo-sl"><span>крен</span><input type="range" id="rollSlider" min="-170" max="170" value="0"><b id="rollVal">0°</b></span>
+        <span class="demo-sl"><span>поворот</span><input type="range" id="yawSlider" min="-90" max="90" value="0"><b id="yawVal">0°</b></span>
+        <span class="demo-sl"><span>сжатие</span><input type="range" id="gripSlider" min="0" max="100" value="0"></span>
+        <span class="muted small">клавиши 1–5 — пальцы, стрелки — кисть</span>
+      </div>
+    </div>
+
+    <aside class="side">
+      <div class="side-block">
+        <div class="side-row"><span class="dot" id="sideDot"></span><b id="sideSrc">Не подключено</b></div>
+        <div class="small muted" id="sideImu"></div>
+        <div class="small" id="sideCal"></div>
+      </div>
+
+      <div class="side-block gesture-block">
+        <svg id="gestureMini" class="mini-hand"></svg>
+        <div>
+          <div class="small muted">Жест</div>
+          <div class="gesture-words" id="gestureWords">—</div>
           <div class="gesture-target" id="mainTarget"></div>
         </div>
-        <div class="bends" id="bendBars"></div>
       </div>
 
-      <div class="card scene-card">
-        <div class="scene-head"><h2>Рабочая зона</h2><span class="muted small">виртуальный захват · модель горячей камеры</span></div>
-        <svg id="scene" viewBox="0 0 360 250" class="scene">
-          <defs>
-            <linearGradient id="beam" x1="0" y1="0" x2="0" y2="1">
-              <stop offset="0" stop-color="#fff3b0" stop-opacity=".55"/><stop offset="1" stop-color="#fff3b0" stop-opacity="0"/>
-            </linearGradient>
-          </defs>
-          <rect class="sc-bg" x="0" y="0" width="360" height="250" rx="12"/>
-          <g class="sc-grid"></g>
-          <polygon class="sc-light" points="150,0 210,0 300,250 60,250"/>
-          <rect class="sc-table" x="20" y="205" width="320" height="10" rx="3"/>
-          <rect class="sc-rod" x="174" y="0" width="12" height="70"/>
-          <rect class="sc-base" x="128" y="66" width="104" height="14" rx="4"/>
-          <g id="jawL"><rect class="sc-jaw" x="-12" y="78" width="12" height="78" rx="3"/></g>
-          <g id="jawR"><rect class="sc-jaw" x="0" y="78" width="12" height="78" rx="3"/></g>
-          <g id="sample">
-            <rect class="sc-sample" x="163" y="146" width="34" height="58" rx="6"/>
-            <rect class="sc-cap" x="160" y="140" width="40" height="10" rx="3"/>
-            <text x="180" y="180" class="sc-label">образец</text>
-          </g>
-          <text id="sceneStatus" x="16" y="26" class="sc-status"></text>
-          <text id="sceneCam" x="344" y="26" class="sc-cam">CAM 1 ● REC</text>
-          <g id="rotDial" transform="translate(318 66)">
-            <circle class="rd-ring" r="24"/>
-            <path class="rd-range" d="M -24 0 A 24 24 0 0 1 24 0"/>
-            <line class="rd-target" id="rdTarget" x1="0" y1="0" x2="0" y2="-24"/>
-            <g id="rdJaws"><rect class="rd-jaw" x="-11" y="-4" width="5" height="8" rx="1.5"/><rect class="rd-jaw" x="6" y="-4" width="5" height="8" rx="1.5"/><rect class="rd-body" x="-6" y="-2" width="12" height="4" rx="1"/></g>
-            <text class="rd-label" id="rdLabel" y="38">поворот 0°</text>
-          </g>
-        </svg>
+      <div class="side-block">
+        <div class="small muted">Пальцы</div>
+        <div class="fingers" id="fingerRows"></div>
+        <div class="small muted" id="fingerNote"></div>
       </div>
 
-      <div class="card ctl-card">
-        <h2>Контроллер команд</h2>
-        <div class="ctl-state" id="ctlState">—</div>
-        <div class="meter">
-          <div class="meter-label"><span>Сжатие кисти</span><b id="tgtVal">0%</b></div>
-          <div class="bar"><div class="fill hand" id="tgtBar"></div></div>
-        </div>
-        <div class="meter">
-          <div class="meter-label"><span>Команда захвату</span><b id="cmdVal">0%</b></div>
-          <div class="bar"><div class="fill cmd" id="cmdBar"></div><div class="limit" id="limitMark" title="ограничение сжатия"></div></div>
-        </div>
-        <div class="meter" id="rotMeter" hidden>
-          <div class="meter-label"><span>Поворот: кисть → захват</span><b id="rotVal">0° → 0°</b></div>
-        </div>
-        <div class="toggles" id="toggles"></div>
-        <div class="cmd-status" id="cmdStatus">
-          <div class="small" id="cmdText"></div>
-          <div class="bar thin"><div class="fill cmd" id="cmdHoldBar"></div></div>
-        </div>
-        <button class="ghost small" id="resetActions">Сбросить пульт</button>
-        <p class="note">Аварийная остановка реального оборудования — отдельной аппаратной кнопкой, не через перчатку.</p>
+      <div class="side-block" id="imuBox" hidden>
+        <div class="small muted">Положение кисти (наклоны — по силе тяжести)</div>
+        <div class="imu-angles"><span>пальцы <b id="imuPitch">0°</b></span><span>крен <b id="imuRoll">0°</b></span><span>поворот <b id="imuYaw">0°</b></span></div>
+        <div class="small" id="imuStatus"></div>
       </div>
-    </div>
 
-    <div class="card demo-strip" id="demoStrip" hidden>
-      <b>Демо-режим</b>
-      <span class="muted small">щёлкайте по пальцам силуэта или клавиши 1–5 · сжатие кисти:</span>
-      <input type="range" id="gripSlider" min="0" max="100" value="0">
-      <label class="check"><input type="checkbox" id="mockAuto"> автоперебор</label>
-      <span class="demo-imu" id="demoImu"><span class="muted small">кисть (← → ↑ ↓): крен</span>
-        <input type="range" id="rollSlider" min="-90" max="90" value="0">
-        <span class="muted small">тангаж</span>
-        <input type="range" id="pitchSlider" min="-80" max="80" value="0"></span>
-    </div>
+      <div class="side-buttons">
+        <button id="openWizard" title="Мастер: ладонь раскрыта 3 с → кулак 3 с → итог по каждому пальцу">Калибровка</button>
+        <button class="ghost" id="imuZero" title="Направьте пальцы на экран и нажмите: поворот вокруг вертикали станет нулевым. Наклоны не меняются — их задаёт сила тяжести">Обнулить поворот</button>
+        <button class="ghost" id="viewReset" title="Вернуть камеру на исходное место (мышью вид можно вращать)">Вид по умолчанию</button>
+        <button class="ghost small" id="imuCal" title="2 с замера смещения гироскопа — держите руку неподвижно">Калибровать гироскоп</button>
+      </div>
 
-    <div class="card log-card">
-      <h2>Журнал</h2>
-      <ul class="log" id="eventLog"><li class="muted">Пока ничего не произошло</li></ul>
-    </div>
+      <details class="side-block log-block">
+        <summary class="small muted">Журнал</summary>
+        <ul class="log" id="eventLog"><li class="muted">Пока ничего не произошло</li></ul>
+      </details>
+    </aside>
   </section>
 
   <!-- ================= СИГНАЛЫ ================= -->
@@ -131,9 +108,8 @@
       <div class="tool">
         <span class="muted small">Калибровка</span>
         <div class="row">
-          <button id="calOpen" title="Раскройте ладонь и нажмите — 1,5 с замера">Ладонь раскрыта</button>
-          <button id="calFist" title="Сожмите кулак и нажмите — 1,5 с замера">Кулак сжат</button>
-          <button class="ghost small" id="calReset">Сбросить</button>
+          <button id="calWizardBtn">Калибровка…</button>
+          <button class="ghost small" id="calReset" title="Забыть сохранённые уровни — снова автокалибровка">Сбросить</button>
         </div>
         <span class="small" id="calStatus"></span>
       </div>
@@ -159,36 +135,22 @@
       </div>
     </div>
 
-    <div class="card pipe-card">
-      <div class="row between">
-        <h2>Фильтрация сигнала</h2>
-        <span class="small muted">график и сгиб считаются по выходу выбранного конвейера</span>
-      </div>
-      <div class="row">
-        <select id="pipePreset"></select>
-        <button class="ghost small" id="pipeApply" hidden>Применить</button>
-        <span class="small" id="pipeHint"></span>
-      </div>
-      <div id="pipeCustom" hidden>
-        <textarea id="pipeJson" rows="4" spellcheck="false"></textarea>
-        <p class="hint">Список блоков по порядку. Фильтры: <span id="pipeTypes"></span>. Пример:
-          <code>[{"type":"hampel","n":7},{"type":"one_euro","min_cutoff":0.7,"beta":0.02}]</code>.
-          Как сравнить конвейеры на записи — <code>python tools/evaluate.py запись.csv --compare one_euro свой.json</code>.</p>
-      </div>
-    </div>
-
     <div class="card">
       <div class="chart-head">
         <h2>Каналы <span class="pill" id="motionPill">покой</span></h2>
         <div class="row">
-          <label class="check"><input type="checkbox" id="showRaw" checked> сырые значения</label>
+          <div class="segmented" id="chartMode">
+            <button data-mode="bend" class="active" title="Сгиб 0–100 % — одна шкала для всех пальцев">Сгиб, %</button>
+            <button data-mode="raw" title="Значения АЦП: шкала от уровня «ладонь» до «кулак» с запасом">Сырые АЦП</button>
+          </div>
+          <label class="check" id="showRawLabel" hidden><input type="checkbox" id="showRaw" checked> до фильтра</label>
           <select id="chartSpan"><option value="5">5 с</option><option value="10" selected>10 с</option><option value="30">30 с</option></select>
           <button class="ghost small" id="chartPause">Пауза</button>
         </div>
       </div>
       <canvas id="chart" class="chart"></canvas>
       <table class="ch-table">
-        <thead><tr><th>Канал</th><th>Палец</th><th>Сырое</th><th>Фильтр</th><th>Сгиб</th><th>0/1</th><th>Калибровка</th><th>Ладонь / кулак</th></tr></thead>
+        <thead><tr><th>Канал</th><th>Палец</th><th>Сырое</th><th>Фильтр</th><th>Δ от ладони</th><th>Сгиб</th><th>Состояние</th><th>Калибровка</th><th>Ладонь / кулак</th></tr></thead>
         <tbody id="chBody"></tbody>
       </table>
       <p class="hint" id="sigHint"></p>
@@ -221,7 +183,7 @@
           </div>
         </div>
         <div class="src-panel" data-panel="mock" hidden>
-          <p class="hint">Имитация перчатки (сигнал похож на реальный: АЦП ≈ 213 в покое, шум, выбросы, 50 Гц).</p>
+          <p class="hint">Имитация перчатки (сигнал похож на реальный: АЦП ≈ 213 в покое, шум, выбросы, 50 Гц) и MPU6050.</p>
           <div class="row">
             <select id="mockN"><option value="2">2 сенсора — как прототип</option><option value="5" selected>5 сенсоров</option></select>
             <button id="mockStart">Включить демо</button>
@@ -232,7 +194,7 @@
           <div class="muted" id="srcMsg"></div>
           <button class="ghost small" id="disconnectBtn">Отключить</button>
         </div>
-        <details class="debug" open>
+        <details class="debug">
           <summary>Отладка потока</summary>
           <table>
             <tr><td>Сообщений в секунду</td><td id="dbgRate">0</td></tr>
@@ -240,6 +202,7 @@
             <tr><td>Режим · формат</td><td id="dbgFormat">—</td></tr>
             <tr><td>Последнее сообщение</td><td><code id="dbgRaw">—</code></td></tr>
             <tr><td>Каналов</td><td id="dbgN">—</td></tr>
+            <tr><td>Комбинация 0/1 (по каналам)</td><td><code id="dbgCombo">—</code></td></tr>
             <tr><td>IMU (MPU6050)</td><td id="dbgImu">нет данных</td></tr>
             <tr><td>Предупреждения</td><td id="dbgWarn">нет</td></tr>
           </table>
@@ -259,19 +222,68 @@
         <div class="row"><span>MPU6050 закреплён</span><select id="imuMount"></select></div>
         <p class="hint">Оси руки: X — к пальцам, Z — от тыльной стороны кисти. Выберите, куда смотрит ось X модуля
           (стрелка на плате) и какой стороной он приклеен; по умолчанию X — к пальцам, лицом от кожи.</p>
-        <label class="row">Удержание жеста перед срабатыванием (управление не активно), мс <input type="number" id="debounce" min="0" max="2000" step="50"></label>
+        <label class="row">Удержание жеста перед срабатыванием, мс <input type="number" id="debounce" min="0" max="2000" step="50"></label>
       </div>
 
       <div class="card wide">
         <div class="row between"><h2>3. Жесты-команды</h2><button class="ghost small" id="clearBindings">Удалить все привязки</button></div>
-        <p class="hint">Все комбинации положений пальцев (согнут / разогнут). Покажите жест — его карточка подсветится; выберите команду. Одна команда — одна комбинация. «Все разогнуты» — покой, не привязывается.
-          Метка «при ARM» показывает, какой жест работает, пока управление активно (там видны только пальцы «чисто команд»;
-          если жесты совпали, выигрывает «Управление захватом», затем «Фиксация»).</p>
+        <p class="hint">Все сочетания согнутых пальцев. Покажите жест — его карточка подсветится; выберите команду. Одна команда — одно сочетание. «Ладонь раскрыта» — покой, не привязывается.</p>
         <div class="bind-grid" id="bindGrid"></div>
       </div>
+
+      <details class="card wide advanced">
+        <summary><h2>4. Дополнительно</h2></summary>
+        <div class="pipe-card">
+          <div class="row between">
+            <h3>Фильтрация сигнала</h3>
+            <span class="small muted">графики и сгиб считаются по выходу выбранного конвейера; по умолчанию — «Базовый» (D-23)</span>
+          </div>
+          <div class="row">
+            <select id="pipePreset"></select>
+            <button class="ghost small" id="pipeApply" hidden>Применить</button>
+            <span class="small" id="pipeHint"></span>
+          </div>
+          <div id="pipeCustom" hidden>
+            <textarea id="pipeJson" rows="4" spellcheck="false"></textarea>
+            <p class="hint">Список блоков по порядку. Фильтры: <span id="pipeTypes"></span>. Пример:
+              <code>[{"type":"hampel","n":7},{"type":"one_euro","min_cutoff":0.7,"beta":0.02}]</code>.
+              Как сравнить конвейеры на записи — <code>python tools/evaluate.py запись.csv --compare one_euro свой.json</code>.</p>
+          </div>
+        </div>
+      </details>
     </div>
   </section>
 </main>
+
+<!-- ================= мастер калибровки ================= -->
+<div class="modal" id="wizard" hidden>
+  <div class="modal-box wizard-box">
+    <div class="wz-steps"><span data-step="1">1. Ладонь</span><span data-step="2">2. Кулак</span><span data-step="3">3. Итог</span></div>
+    <div class="wz-body" id="wzPose">
+      <svg id="wzHand" class="wz-hand"></svg>
+      <div class="wz-text">
+        <div class="wz-title" id="wzTitle"></div>
+        <div class="wz-sub" id="wzSub"></div>
+        <div class="wz-count" id="wzCount"></div>
+        <div class="bar"><div class="fill cmd" id="wzBar"></div></div>
+      </div>
+    </div>
+    <div class="wz-body" id="wzReview" hidden>
+      <table class="ch-table wz-table">
+        <thead><tr><th>Канал</th><th>Палец</th><th>Ладонь</th><th>Кулак</th><th>Размах</th><th>Шум</th><th>Оценка</th></tr></thead>
+        <tbody id="wzRows"></tbody>
+      </table>
+      <p class="hint" id="wzHint"></p>
+    </div>
+    <div class="row wz-actions">
+      <button class="ghost" id="wzCancel">Закрыть</button>
+      <span class="grow"></span>
+      <button class="ghost" id="wzRetry" hidden>Повторить</button>
+      <button id="wzGo">Начать</button>
+      <button id="wzSave" hidden>Сохранить</button>
+    </div>
+  </div>
+</div>
 
 <div class="toast" id="toast" hidden></div>
 <div class="proto" id="proto" hidden>
@@ -283,9 +295,9 @@
     <button class="ghost small" id="protoCancel">Прервать</button>
   </div>
 </div>
-<script src="/static/hand.js"></script>
-<script src="/static/chart.js"></script>
-<script src="/static/app.js"></script>
-<script type="module" src="/static/hand3d.js"></script>
+<script src="/static/hand.js?v=__V__"></script>
+<script src="/static/chart.js?v=__V__"></script>
+<script src="/static/app.js?v=__V__"></script>
+<script type="module" src="/static/hand3d.js?v=__V__"></script>
 </body>
 </html>

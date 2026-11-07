@@ -215,18 +215,85 @@ select, input[type=number] { font: inherit; font-size: 14px; padding: 6px 9px; b
 .pipe-card textarea.bad { border-color: var(--bad); }
 .pill.motion { background: var(--accent-soft); color: var(--accent); }
 
-/* ---------- 3D-рука и ориентация ---------- */
-.hand3d { height: 320px; border-radius: 12px; background: radial-gradient(circle at 50% 35%, #f6f6f7 0%, #e6e7e9 60%, #d9dadd 100%);
-  overflow: hidden; }
-.hand3d canvas { width: 100%; height: 100%; display: block; }
-.imu-box { margin-top: 8px; display: grid; gap: 4px; }
-.imu-angles { display: flex; justify-content: space-between; font-size: 12.5px; color: var(--muted); }
+/* ---------- главный экран «Рука» (этап 4б): 3D-рука ≈ 72 % ширины на всю высоту + узкая панель ---------- */
+body.on-hand main { padding: 0; max-width: none; }
+.hand-page { display: grid; grid-template-columns: minmax(0, 1fr) clamp(300px, 27vw, 380px);
+  height: calc(100vh - var(--topbar-h, 57px)); min-height: 520px; }
+.stage { position: relative; overflow: hidden;
+  background: radial-gradient(ellipse at 50% 38%, #f7f7f8 0%, #e9eaec 55%, #d9dbde 100%); }
+.hand3d { position: absolute; inset: 0; }
+.hand3d canvas { width: 100%; height: 100%; display: block; cursor: grab; }
+.hand3d canvas:active { cursor: grabbing; }
+.stage-2d { position: absolute; inset: 40px; display: grid; place-items: center; }
+.stage-2d svg { height: 100%; max-height: 640px; width: auto; }
+.stage-banners { position: absolute; top: 14px; left: 16px; right: 16px; display: grid; gap: 8px; pointer-events: none; }
+.stage-banners .banner { pointer-events: auto; margin: 0; max-width: 640px; }
+.stage-pose { position: absolute; top: 14px; right: 16px; font-size: 12.5px; color: #6b7489; font-variant-numeric: tabular-nums; }
+.demo-bar { position: absolute; left: 16px; right: 16px; bottom: 14px; display: flex; flex-wrap: wrap; align-items: center; gap: 10px 16px;
+  background: #ffffffd9; backdrop-filter: blur(6px); border: 1px solid var(--line); border-radius: 12px; padding: 8px 14px; font-size: 13px; }
+.demo-sl { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); }
+.demo-sl input[type=range] { width: 110px; }
+.demo-sl b { min-width: 38px; color: var(--text); font-variant-numeric: tabular-nums; }
+
+.side { background: var(--card); border-left: 1px solid var(--line); overflow-y: auto; padding: 14px 16px; display: grid;
+  gap: 12px; align-content: start; }
+.side-block { display: grid; gap: 6px; padding-bottom: 12px; border-bottom: 1px solid var(--line); }
+.side-row { display: flex; align-items: center; gap: 8px; }
+.cal-status.ok { color: var(--ok); }
+.cal-status.warn { color: #a36c00; font-weight: 600; }
+.gesture-block { grid-template-columns: 56px 1fr; align-items: center; gap: 12px; }
+.mini-hand { width: 56px; height: auto; }
+.gesture-words { font-size: 19px; font-weight: 700; line-height: 1.25; }
+.gesture-target { font-weight: 600; color: var(--accent); font-size: 14px; }
+.fingers { display: grid; gap: 9px; }
+.finger-row { display: grid; gap: 3px; }
+.fr-top, .fr-bottom { display: flex; justify-content: space-between; gap: 8px; }
+.fr-name { font-weight: 600; }
+.fr-pct { font-variant-numeric: tabular-nums; }
+.fr-bottom { font-size: 12px; color: var(--muted); }
+.fr-word { color: var(--text); }
+.finger-row .fill { background: #9aa9c4; transition: width .1s linear; }
+.finger-row .fill.half { background: #6d86b8; }
+.finger-row .fill.bent { background: var(--accent); }
+.imu-angles { display: flex; justify-content: space-between; gap: 6px; font-size: 13px; color: var(--muted); }
 .imu-angles b { color: var(--text); font-variant-numeric: tabular-nums; }
-.rd-ring { fill: #ffffff10; stroke: #ffffff40; stroke-width: 1; }
-.rd-range { fill: none; stroke: #ffffff22; stroke-width: 3; }
-.rd-target { stroke: #fff3b0; stroke-width: 1.2; stroke-dasharray: 2 2; }
-.rd-jaw { fill: #c6cdd9; }
-.rd-body { fill: #8b95a8; }
-.rd-label { fill: #c6cdd9; font: 600 8px ui-monospace, monospace; text-anchor: middle; }
-.demo-imu { display: inline-flex; align-items: center; gap: 8px; flex-wrap: wrap; }
-.demo-imu input[type=range] { width: 130px; }
+.side-buttons { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.side-buttons #openWizard { grid-column: 1 / -1; padding: 10px; font-size: 15px; }
+.side-buttons .small { grid-column: 1 / -1; justify-self: start; }
+.log-block summary { cursor: pointer; }
+.log-block .log { max-height: 200px; margin-top: 6px; }
+.log-block .log li { font-size: 12.5px; }
+
+/* ---------- мастер калибровки ---------- */
+.modal { position: fixed; inset: 0; background: #1b233366; display: grid; place-items: center; z-index: 20; }
+.modal-box { background: var(--card); border-radius: 18px; padding: 22px 26px; width: min(720px, 94vw); box-shadow: 0 10px 40px #0003;
+  display: grid; gap: 16px; }
+.wz-steps { display: flex; gap: 8px; }
+.wz-steps span { flex: 1; text-align: center; padding: 6px; border-radius: 9px; background: var(--bg); color: var(--muted); font-weight: 600; font-size: 14px; }
+.wz-steps span.on { background: var(--accent-soft); color: var(--accent); }
+.wz-body { display: grid; grid-template-columns: 150px 1fr; gap: 24px; align-items: center; min-height: 220px; }
+#wzReview { grid-template-columns: 1fr; align-items: start; }
+.wz-hand { width: 150px; height: auto; }
+.wz-title { font-size: 28px; font-weight: 700; }
+.wz-sub { color: var(--muted); margin: 6px 0 12px; line-height: 1.45; }
+.wz-count { font: 700 34px ui-monospace, Consolas, monospace; min-height: 44px; color: var(--accent); }
+.wz-actions { display: flex; gap: 8px; align-items: center; }
+.wz-actions .grow { flex: 1; }
+.grade { padding: 2px 8px; border-radius: 12px; font-family: "Segoe UI", sans-serif; font-size: 12.5px; white-space: nowrap; }
+.grade.good { background: #e3f6ea; color: var(--ok); }
+.grade.weak { background: #fff3d6; color: #a36c00; }
+.grade.flat, .grade.no_data { background: #fde7e7; color: var(--bad); }
+
+.bind-card .bc-words { font-weight: 600; font-size: 13.5px; min-height: 2.6em; display: grid; place-items: center; }
+.advanced summary { list-style: none; cursor: pointer; }
+.advanced summary h2 { display: inline; }
+.advanced summary::before { content: "▸ "; color: var(--muted); }
+.advanced[open] summary::before { content: "▾ "; }
+.advanced .pipe-card { margin: 12px 0 0; }
+.advanced h3 { margin: 0; font-size: 15px; }
+
+@media (max-width: 900px) {
+  .hand-page { grid-template-columns: 1fr; height: auto; }
+  .stage { height: 70vh; }
+  .side { border-left: none; border-top: 1px solid var(--line); }
+}

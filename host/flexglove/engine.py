@@ -486,6 +486,7 @@ class Engine:
                 "stale": ch.stale(now) if self.mode == "values" else False,
                 "mode": ch.mode if self.mode == "values" else "bits",
                 "cal": {"open": ch.cal.open, "fist": ch.cal.fist},
+                "rest": round(ch.auto_rest, 1) if ch.auto_rest is not None else None,   # уровень покоя автокалибровки
             })
         bindings = {c: a for c, a in self.storage.bindings().items() if a in ACTIONS}
         c = self.controller
