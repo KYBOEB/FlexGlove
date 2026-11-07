@@ -4,6 +4,9 @@
     pythonw -m flexglove.desktop [--demo] [--port 8000] [--no-tray]
 
 Если приложение уже запущено — просто открывает его вкладку в браузере (второй копии не будет).
+Но если запущена ДРУГАЯ версия или копия из другой папки (например, старая v0.5.0), её просят остановиться
+(/api/shutdown) и запускают эту — иначе ярлык показывал бы старую версию. Старые версии без /api/shutdown
+продолжают работать, а новая запускается на следующем свободном порту.
 Журнал работы — data/flexglove.log.
 """
 from __future__ import annotations
@@ -25,7 +28,7 @@ import uvicorn
 
 from . import __version__
 from .__main__ import free_port
-from .app import DATA_DIR, DEFAULT_DB, WEB_DIR, create_app
+from .app import DATA_DIR, DEFAULT_DB, PROJECT_ROOT, WEB_DIR, create_app
 
 LOG_FILE = DATA_DIR / "flexglove.log"
 log = logging.getLogger("flexglove.desktop")
@@ -44,12 +47,37 @@ def setup_logging() -> None:
         sys.stderr = sys.stderr or stream
 
 
-def is_flexglove(url: str) -> bool:
+def ping(url: str) -> dict | None:
     try:
         with urllib.request.urlopen(url + "/api/ping", timeout=0.5) as r:
-            return json.loads(r.read()).get("app") == "flexglove"
+            data = json.loads(r.read())
+            return data if data.get("app") == "flexglove" else None
     except (OSError, ValueError):
-        return False
+        return None
+
+
+def is_flexglove(url: str) -> bool:
+    return ping(url) is not None
+
+
+def same_instance(info: dict) -> bool:
+    """Запущена ли та же версия из той же папки, что и эта копия."""
+    return info.get("version") == __version__ and Path(info.get("root", "")) == PROJECT_ROOT
+
+
+def stop_other(url: str, timeout: float = 5.0) -> bool:
+    """Попросить другую копию остановиться. True — остановилась."""
+    try:
+        req = urllib.request.Request(url + "/api/shutdown", method="POST", data=b"")
+        urllib.request.urlopen(req, timeout=1.0).close()
+    except OSError:
+        return False                                   # старая версия без /api/shutdown
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if not is_flexglove(url):
+            return True
+        time.sleep(0.2)
+    return False
 
 
 def wait_ready(url: str, timeout: float = 20.0) -> bool:
@@ -72,7 +100,7 @@ def open_path(path: Path) -> None:
         subprocess.Popen(["xdg-open", str(path)])
 
 
-def run_tray(url: str, server: uvicorn.Server) -> None:
+def run_tray(url: str, server: uvicorn.Server, holder: dict | None = None) -> None:
     import pystray
     from PIL import Image
 
@@ -88,6 +116,8 @@ def run_tray(url: str, server: uvicorn.Server) -> None:
         pystray.MenuItem("Выход", stop),
     )
     icon = pystray.Icon("FlexGlove", Image.open(WEB_DIR / "icon.png"), f"FlexGlove {__version__} — {url}", menu)
+    if holder is not None:
+        holder["icon"] = icon
     icon.run()
 
 
@@ -101,20 +131,33 @@ def main(argv: list[str] | None = None) -> None:
     args = parser.parse_args(argv)
     setup_logging()
 
-    # уже запущено? — открываем вкладку и выходим
+    # уже запущено? та же версия из этой папки — открываем вкладку и выходим; другая — останавливаем её
     for p in range(args.port, args.port + 10):
         url = f"http://{args.host}:{p}"
-        if is_flexglove(url):
+        info = ping(url)
+        if info is None:
+            continue
+        if same_instance(info):
             log.info("already running at %s", url)
             if not args.no_browser:
                 webbrowser.open(url)
             return
+        log.info("another FlexGlove at %s (version %s, %s) — asking it to stop", url, info.get("version"), info.get("root"))
+        if not stop_other(url):
+            log.warning("could not stop FlexGlove at %s — starting this version on another port", url)
 
     port = free_port(args.host, args.port)
     url = f"http://{args.host}:{port}"
-    config = uvicorn.Config(create_app(DEFAULT_DB, demo=args.demo), host=args.host, port=port,
-                            log_config=None, log_level="warning")
+    app = create_app(DEFAULT_DB, demo=args.demo)
+    config = uvicorn.Config(app, host=args.host, port=port, log_config=None, log_level="warning")
     server = uvicorn.Server(config)
+    tray: dict = {}
+
+    def shutdown() -> None:                            # /api/shutdown — новая копия просит уступить место
+        server.should_exit = True
+        if tray.get("icon") is not None:
+            tray["icon"].stop()
+    app.state.shutdown = shutdown
     thread = threading.Thread(target=server.run, name="server", daemon=True)
     thread.start()
     log.info("FlexGlove %s starting at %s", __version__, url)
@@ -129,7 +172,7 @@ def main(argv: list[str] | None = None) -> None:
     try:
         if args.no_tray:
             raise ImportError("tray disabled")
-        run_tray(url, server)
+        run_tray(url, server, tray)
     except Exception as exc:  # noqa: BLE001 - нет pystray / нет трея в системе — работаем без значка
         log.info("tray not used: %s", exc)
         try:

@@ -44,7 +44,8 @@ class RevalidatedStaticFiles(StaticFiles):
 def render_index() -> str:
     """index.html с версией в ссылках на статику (?v=…): новая версия — новые адреса — гарантированно свежие файлы."""
     return (WEB_DIR / "index.html").read_text(encoding="utf-8").replace(STATIC_VERSION_TOKEN, __version__)
-DATA_DIR = Path(__file__).resolve().parents[2] / "data"
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+DATA_DIR = PROJECT_ROOT / "data"
 DEFAULT_DB = DATA_DIR / "flexglove.db"
 
 
@@ -175,7 +176,17 @@ def create_app(db_path: Path | str = DEFAULT_DB, demo: bool = False) -> FastAPI:
     # ---------- служебное ----------
     @app.get("/api/ping")
     async def ping():
-        return {"app": "flexglove", "version": __version__}
+        # версия и папка — чтобы ярлык не открыл вместо новой версии уже запущенную старую (desktop.py)
+        return {"app": "flexglove", "version": __version__, "root": str(PROJECT_ROOT)}
+
+    @app.post("/api/shutdown")
+    async def shutdown():
+        """Остановить приложение (вызывает новая копия при запуске, если работает другая версия или папка)."""
+        stop = getattr(app.state, "shutdown", None)
+        if stop is None:
+            raise HTTPException(409, "Остановка доступна только у приложения, запущенного ярлыком")
+        asyncio.get_running_loop().call_later(0.2, stop)
+        return {"stopping": True}
 
     @app.get("/api/state")
     async def get_state():
