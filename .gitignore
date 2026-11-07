@@ -21,3 +21,6 @@ Thumbs.db
 build/
 wheels/
 dist/
+
+# резервные копии истории git (git bundle)
+*.bundle

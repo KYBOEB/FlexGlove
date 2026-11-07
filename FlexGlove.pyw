@@ -5,6 +5,10 @@
 и в меню «Пуск». Дальше приложение запускается ярлыком: без консоли, интерфейс открывается
 в браузере по умолчанию, значок — в области уведомлений рядом с часами.
 
+При каждом запуске ярлыки перезаписываются так, чтобы вести в ЭТУ папку (в фоне, без ожидания): если раньше
+приложение ставилось из другой копии проекта, ярлык больше не запустит старую версию. Если уже работает другая
+версия или копия из другой папки, приложение само попросит её закрыться (flexglove/desktop.py).
+
 Файл использует только стандартную библиотеку Python 3.10+.
 """
 from __future__ import annotations
@@ -74,8 +78,8 @@ def setup(status) -> None:
     MARK.write_text(req_hash())
 
 
-def create_shortcuts(log) -> None:
-    """Ярлык «FlexGlove» на рабочем столе и в меню «Пуск» (через PowerShell, без доп. пакетов)."""
+def shortcut_script() -> str:
+    """PowerShell: ярлык «FlexGlove» на рабочем столе и в меню «Пуск», ведущий в эту папку."""
     q = lambda p: str(p).replace("'", "''")  # noqa: E731 - экранирование для строки PowerShell
     target, args, workdir, icon = q(venv_python(gui=True)), "-m flexglove.desktop", q(HOST), q(ICON)
     ps = (
@@ -83,9 +87,24 @@ def create_shortcuts(log) -> None:
         "foreach ($d in @([Environment]::GetFolderPath('Desktop'), [Environment]::GetFolderPath('Programs'))) {"
         "  $s = $w.CreateShortcut((Join-Path $d 'FlexGlove.lnk'));"
         f"  $s.TargetPath = '{target}'; $s.Arguments = '{args}'; $s.WorkingDirectory = '{workdir}';"
-        f"  $s.IconLocation = '{icon}'; $s.Description = 'FlexGlove — пульт перчатки'; $s.Save() }}"
+        f"  $s.IconLocation = '{icon}'; $s.Description = 'FlexGlove — перчатка-интерфейс'; $s.Save() }}"
     )
-    run(["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", ps], log)
+    return ps
+
+
+def create_shortcuts(log) -> None:
+    run(["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", shortcut_script()], log)
+
+
+def refresh_shortcuts() -> None:
+    """Перезаписать ярлыки в фоне (ярлык мог остаться от копии проекта в другой папке)."""
+    if not WIN:
+        return
+    try:
+        subprocess.Popen(["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", shortcut_script()],
+                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, creationflags=NO_WINDOW)
+    except OSError:
+        pass
 
 
 def launch() -> None:
@@ -145,6 +164,8 @@ def main() -> None:
             raise SystemExit(1)
     if needs_setup():
         setup_with_window()
+    else:
+        refresh_shortcuts()
     launch()
 
 

@@ -1,21 +1,21 @@
-/* FlexGlove — интерфейс пульта. Состояние приходит по WebSocket (/ws) ~30 раз в секунду,
-   команды уходят через REST (/api). */
+/* FlexGlove — интерфейс. Состояние приходит по WebSocket (/ws) ~30 раз в секунду, команды уходят через REST (/api).
+   Этап 4б: главный экран «Рука» — большая 3D-рука (hand3d.js) и узкая панель справа: пальцы процентами и словами,
+   жест словами, связь, IMU и калибровка. «Рабочая зона» и карточка контроллера убраны из интерфейса (D-26), ядро
+   по-прежнему ведёт контроллер и команды. Двоичная строка комбинации осталась только в «Отладке потока». */
 (function () {
   const $ = (s) => document.querySelector(s);
   const $$ = (s) => Array.from(document.querySelectorAll(s));
-  const STATE_TEXT = {
-    active: "Управление активно", disarmed: "Управление заблокировано",
-    hold: "Захват зафиксирован", no_link: "Нет связи с перчаткой",
-  };
   const MODE_TEXT = { calibrated: "калибровка", auto: "автокалибровка", uncalibrated: "нет калибровки", bits: "биты 0/1" };
 
   let META = { actions: [], fingers: [], version: "" };
   let S = null;
   let lastEventTs = 0;
-  let bindKey = "", mapKey = "", tableKey = "";
+  let bindKey = "", mapKey = "", tableKey = "", rowsKey = "";
 
-  const handMain = new HandView($("#handMain"), { onFinger: (f) => demoToggleFinger(f) });
   const handSettings = new HandView($("#handSettings"));
+  const handMain = new HandView($("#handMain"), { onFinger: (f) => demoToggleFinger(f) });   // 2D, если нет WebGL
+  const gestureMini = new HandView($("#gestureMini"), { static: true });
+  const wzHand = new HandView($("#wzHand"), { static: true });
   const chart = new LaneChart($("#chart"));
   let hand3d = null;                                   // 3D-рука (hand3d.js, ES-модуль); null — 2D-силуэт
   function init3d() {
@@ -47,7 +47,8 @@
   }
   const act = (id) => META.actions.find((a) => a.id === id) || { title: id, on_label: "вкл", off_label: "выкл" };
   const fname = (f) => window.FINGER_NAMES[f] || f;
-  const pct = (x) => `${Math.round((x || 0) * 100)}%`;
+  const pct = (x) => `${Math.round((x || 0) * 100)} %`;
+  const bendWord = (b) => (b < 0.25 ? "разогнут" : b < 0.65 ? "полусогнут" : "согнут");
   const combosFor = (n) => Array.from({ length: 2 ** n }, (_, i) => i.toString(2).padStart(n, "0").split("").reverse().join(""))
     .sort((a, b) => (a.split("1").length - b.split("1").length) || (a < b ? 1 : -1));
   function bendsByFinger(values, map) {
@@ -55,16 +56,21 @@
     values.forEach((v, i) => { if (map[i]) out[map[i]] = v; });
     return out;
   }
-  function bentNames(combo, map) {
-    const names = [...combo].map((c, i) => (c === "1" ? fname(map[i]) : null)).filter(Boolean);
-    return names.length ? names.join(", ") : "все разогнуты";
+  /** Комбинация словами: «указательный + средний», «ладонь раскрыта», «кулак». */
+  function comboWords(combo, map) {
+    if (!combo) return "—";
+    const bits = [...combo];
+    if (!bits.includes("1")) return "ладонь раскрыта";
+    if (bits.length >= 5 && !bits.includes("0")) return "кулак";        // кулак — только если сенсоры на всех пальцах
+    return bits.map((c, i) => (c === "1" ? fname(map[i]) : null)).filter(Boolean).join(" + ");
   }
 
   // ---------------- вкладки ----------------
   function showTab() {
-    const tab = ["#signals", "#settings"].includes(location.hash) ? location.hash.slice(1) : "control";
+    const tab = ["#signals", "#settings"].includes(location.hash) ? location.hash.slice(1) : "hand";
     $$(".page").forEach((p) => (p.hidden = p.id !== "tab-" + tab));
     $$(".tab").forEach((a) => a.classList.toggle("active", a.dataset.tab === tab));
+    document.body.classList.toggle("on-hand", tab === "hand");
     if (tab === "signals") refreshRecordings();
   }
   window.addEventListener("hashchange", showTab);
@@ -98,23 +104,8 @@
     const bends = bendsByFinger(chans.map((c) => (c.stale ? 0 : c.bend)), map);
     handMain.set(bends); handSettings.set(bends);
     const ori = S.orientation;
-    if (hand3d) hand3d.setTarget({ q: ori && !ori.stale ? ori.q : null, bends, sensed: new Set(map.slice(0, n)), hand: S.hand });
-    renderOrientation(ori);
-    $("#mainCombo").textContent = S.combo || "—";
-    const bound = S.committed && S.bindings[S.committed];
-    $("#mainTarget").textContent = bound ? `→ ${act(bound).title}` : "";
-    renderBendBars(chans, map);
-
-    // контроллер и сцена
-    const c = S.controller;
-    const st = $("#ctlState"); st.className = "ctl-state " + c.state; st.textContent = STATE_TEXT[c.state] || c.state;
-    $("#tgtVal").textContent = pct(c.target); $("#tgtBar").style.width = pct(c.target);
-    $("#cmdVal").textContent = pct(c.command); $("#cmdBar").style.width = pct(c.command);
-    $("#limitMark").style.left = pct(c.max_close);
-    renderScene(c, S.actions.light);
-    renderRotation(c, ori);
-    renderToggles();
-    renderCommandStatus(map);
+    if (hand3d) hand3d.setTarget({ q: ori && !ori.stale ? ori.q_world : null, bends, sensed: new Set(map.slice(0, n)), hand: S.hand });
+    renderSide(src, connected, chans, map, ori);
     renderLog();
 
     const isMock = src.kind === "mock" && connected;
@@ -124,12 +115,15 @@
     // сигналы
     if (S.mode !== "none") {
       chart.labels = chans.map((_, i) => `S${i + 1} · ${fname(map[i] || "")}`);
-      chart.push(performance.now() / 1000, chans.map((x) => x.raw), chans.map((x) => (x.filtered ?? x.bit)));
+      chart.cal = chans.map((c) => c.cal);
+      chart.push(performance.now() / 1000, chans.map((x) => x.raw), chans.map((x) => (x.filtered ?? x.bit)),
+        chans.map((x) => (x.stale ? null : x.bend)));
     }
     renderChannelTable(chans, map);
     renderSignalsToolbar();
     renderProtoChannels();
     renderPipeline();
+    renderWizard();
 
     // настройки
     $("#srcDot").className = "dot" + (connected ? " ok" : src.kind ? " wait" : "");
@@ -141,6 +135,7 @@
     $("#dbgFormat").textContent = `${S.mode} · ${S.stats.format || "—"}`;
     $("#dbgRaw").textContent = S.stats.last_raw || "—";
     $("#dbgN").textContent = n;
+    $("#dbgCombo").textContent = S.combo || "—";
     $("#dbgWarn").textContent = warns.length ? warns.join(" · ") : "нет";
     const imu = S.imu;
     $("#dbgImu").textContent = !imu ? "нет данных (протокол v0.2)"
@@ -154,105 +149,80 @@
     if (document.activeElement !== deb) deb.value = S.debounce_ms;
   }
 
-  function renderBendBars(chans, map) {
-    const box = $("#bendBars");
-    if (box.children.length !== chans.length) {
-      box.innerHTML = chans.map((_, i) => `<div class="bend-row"><span></span><div class="bar"><div class="fill"></div></div><b></b></div>`).join("");
+  /** Статус калибровки для главного экрана и «Сигналов». */
+  function calibrationStatus(chans) {
+    const live = chans.filter((c) => !c.stale && c.mode !== "bits");
+    if (!live.length) return { cls: "", text: S.mode === "bits" ? "Перчатка присылает готовые 0/1 — калибровка не нужна" : "" };
+    const cal = live.filter((c) => c.mode === "calibrated").length;
+    if (cal === live.length) return { cls: "ok", text: `✓ Калибровка выполнена (${cal} из ${live.length})` };
+    if (cal) return { cls: "warn", text: `Калибровка частичная: ${cal} из ${live.length} — нажмите «Калибровка»` };
+    return { cls: "warn", text: "⚠ Нужна калибровка — сгиб сейчас приблизительный. Нажмите «Калибровка»" };
+  }
+
+  function renderSide(src, connected, chans, map, ori) {
+    $("#sideDot").className = "dot" + (connected ? " ok" : src.kind ? " wait" : "");
+    $("#sideSrc").textContent = connected ? `${src.name || "Перчатка"} · ${S.stats.rate} Гц` : (src.message || "Не подключено");
+    $("#sideImu").textContent = !connected ? "" : !ori ? "Без датчика ориентации — рука показана пальцами вверх"
+      : ori.calibrating ? "⏳ Калибровка гироскопа: держите руку неподвижно 2 с"
+      : ori.stale ? "Нет данных MPU6050" : `MPU6050: ${ori.bias_ok ? "гироскоп откалиброван" : "гироскоп калибруется в покое"} · ${ori.at_rest ? "покой" : "движение"}`;
+    const cs = calibrationStatus(chans);
+    const sc = $("#sideCal"); sc.textContent = cs.text; sc.className = "small cal-status " + cs.cls;
+
+    // жест словами + мини-силуэт
+    $("#gestureWords").textContent = S.n_channels ? comboWords(S.combo, map) : "—";
+    gestureMini.set(S.combo ? bendsByFinger([...S.combo].map(Number), map) : {});
+    const bound = S.committed && S.bindings[S.committed];
+    $("#mainTarget").textContent = bound ? `→ ${act(bound).title}` : "";
+
+    // пальцы: название, полоса, слово; мелко — сырое и «Δ от ладони»
+    const key = chans.length + "|" + map.join();
+    const box = $("#fingerRows");
+    if (key !== rowsKey) {
+      rowsKey = key;
+      box.innerHTML = chans.map((_, i) => `<div class="finger-row">
+        <div class="fr-top"><span class="fr-name"></span><b class="fr-pct"></b></div>
+        <div class="bar"><div class="fill"></div></div>
+        <div class="fr-bottom"><span class="fr-word"></span><span class="fr-raw"></span></div></div>`).join("");
     }
     chans.forEach((ch, i) => {
       const row = box.children[i];
-      row.children[0].textContent = `${i + 1} · ${fname(map[i] || "")}`;
-      row.querySelector(".fill").style.width = pct(ch.stale ? 0 : ch.bend);
-      row.children[2].textContent = ch.stale ? "—" : pct(ch.bend);
+      const b = ch.stale ? 0 : ch.bend;
+      row.querySelector(".fr-name").textContent = `${fname(map[i] || "")}`;
+      row.querySelector(".fr-pct").textContent = ch.stale ? "—" : pct(b);
+      const fill = row.querySelector(".fill");
+      fill.style.width = pct(b).replace(" ", "");
+      fill.className = "fill " + (ch.stale ? "" : b >= 0.65 ? "bent" : b >= 0.25 ? "half" : "");
+      row.querySelector(".fr-word").textContent = ch.stale ? "нет данных" : bendWord(b);
+      const base = ch.cal.open ?? ch.rest;
+      row.querySelector(".fr-raw").textContent = ch.raw == null ? (S.mode === "bits" ? "0/1" : "")
+        : `сырое ${Math.round(ch.raw)}` + (base != null ? ` · Δ от ладони ${fmtDelta(ch.raw - base)}` : "");
     });
-  }
+    const missing = 5 - Math.min(5, S.n_channels || 0);
+    $("#fingerNote").textContent = !S.n_channels ? "Подключите перчатку или демо"
+      : missing ? `Остальные пальцы без сенсора — на 3D-руке показаны светлыми, в спокойной позе` : "";
 
-  function renderScene(c, light) {
-    const scene = $("#scene");
-    const gapMax = 100, sampleW = 36;
-    const gap = gapMax * (1 - c.command);
-    const vis = Math.max(gap, sampleW);
-    const grabbed = gap <= sampleW + 2;
-    $("#jawL").setAttribute("transform", `translate(${180 - vis / 2} 0)`);
-    $("#jawR").setAttribute("transform", `translate(${180 + vis / 2} 0)`);
-    scene.classList.toggle("grabbed", grabbed);
-    scene.classList.toggle("light-on", !!light);
-    $("#sceneStatus").textContent = grabbed ? "Образец захвачен" : (c.state === "active" ? "Захват следует за рукой" : STATE_TEXT[c.state]);
-  }
-
-  const deg = (x) => `${x > 0 ? "+" : ""}${Math.round(x || 0)}°`;
-  function renderOrientation(o) {
-    $("#imuBox").hidden = !o;
-    if (!o) return;
-    $("#imuRoll").textContent = deg(o.roll); $("#imuPitch").textContent = deg(o.pitch); $("#imuYaw").textContent = deg(o.yaw);
-    const st = o.calibrating ? "⏳ Калибровка гироскопа: держите руку неподвижно 2 с"
-      : !o.bias_ok ? "Гироскоп не откалиброван — подержите руку неподвижно"
-      : `Гироскоп откалиброван (${o.bias_source}) · ${o.at_rest ? "рука в покое" : "движение"}` + (o.stale ? " · нет данных IMU" : "");
-    $("#imuStatus").textContent = o.message && !o.calibrating && o.message.includes("не принята") ? o.message : st;
-    $("#imuDrift").textContent = `Поворот вокруг вертикали (рысканье) у MPU6050 медленно уходит — ≈ ${String(o.yaw_drift_deg_min).replace(".", ",")}°/мин ` +
-      "по замеру на модели датчика (без калибровки гироскопа — до 20°/мин). Время от времени нажимайте «Обнулить положение». " +
-      "Наклоны (крен, тангаж) не уходят — их держит сила тяжести.";
-    $("#imuZero").disabled = $("#imuCal").disabled = !!o.calibrating;
-  }
-
-  function renderRotation(c, o) {
-    $("#rotMeter").hidden = !o;
-    $("#rotDial").style.display = o ? "" : "none";
-    if (!o) return;
-    $("#rotVal").textContent = `${deg(c.rot_target)} → ${deg(c.rot_command)}`;
-    // вид сверху: губки повёрнуты на команду, пунктир — куда тянет кисть
-    $("#rdJaws").setAttribute("transform", `rotate(${-c.rot_command})`);
-    $("#rdTarget").setAttribute("transform", `rotate(${-c.rot_target})`);
-    $("#rdLabel").textContent = `поворот ${deg(c.rot_command)}`;
-  }
-
-  function renderToggles() {
-    const box = $("#toggles");
-    const comboOf = {};
-    for (const [combo, a] of Object.entries(S.bindings)) comboOf[a] = combo;
-    if (!box.children.length && META.actions.length) {
-      box.innerHTML = META.actions.map((a) => `<button class="toggle" data-action="${a.id}" title="${a.hint}">
-        <span class="t-title">${a.title}</span><span class="t-bind"></span><span class="t-state"></span></button>`).join("");
+    // ориентация
+    $("#imuBox").hidden = !ori;
+    if (ori) {
+      $("#imuPitch").textContent = `${deg(ori.pitch)} ${ori.pitch > 25 ? "вверх" : ori.pitch < -25 ? "вниз" : ""}`;
+      $("#imuRoll").textContent = deg(ori.roll); $("#imuYaw").textContent = deg(ori.yaw);
+      $("#imuStatus").textContent = ori.message && ori.message.includes("не принята") ? ori.message
+        : `Поворот вокруг вертикали у MPU6050 медленно уходит (≈ ${String(ori.yaw_drift_deg_min).replace(".", ",")}°/мин) — направьте пальцы на экран и нажмите «Обнулить поворот».`;
     }
-    $$("#toggles .toggle").forEach((b) => {
-      const id = b.dataset.action, on = !!S.actions[id], a = act(id);
-      b.classList.toggle("on", on);
-      b.querySelector(".t-state").textContent = on ? a.on_label : a.off_label;
-      const html = comboOf[id] ? `<span class="chip">${comboOf[id]}</span>` : `<span class="chip none">нет жеста</span>`;
-      const tb = b.querySelector(".t-bind"); if (tb.innerHTML !== html) tb.innerHTML = html;
-    });
+    $("#imuZero").disabled = $("#imuCal").disabled = !ori || !!ori.calibrating;
+    $("#stagePose").textContent = !ori ? "" : `пальцы ${deg(ori.pitch)} · крен ${deg(ori.roll)} · поворот ${deg(ori.yaw)}`;
   }
-
-  function renderCommandStatus(map) {
-    const cs = S.command || {}, roles = S.roles || [], box = $("#cmdStatus");
-    const pure = roles.map((r, i) => (r.cmd && !r.grip ? i : -1)).filter((i) => i >= 0);
-    const armed = cs.armed_mode;
-    let text;
-    if (!S.n_channels) text = "";
-    else if (!armed) text = "Управление не активно: жесты — по всем пальцам команд.";
-    else if (!pure.length) text = "Управление активно. Жестовых команд нет: все пальцы ведут захват (снимите ARM кнопкой).";
-    else {
-      const items = Object.entries(cs.armed_bindings || {}).map(([combo, a]) => `${bentNames(combo, map)} → ${act(a).title}`);
-      text = `Управление активно. Команды удержанием ${cs.hold_s || 1} с: ${items.length ? items.join("; ") : "нет привязок"}.`;
-    }
-    if (cs.blocked) text = "Жест не выполнен: пальцы команд двигались вместе со сжатием.";
-    $("#cmdText").textContent = text;
-    box.classList.toggle("blocked", !!cs.blocked);
-    $("#cmdHoldBar").style.width = pct(cs.blocked ? 0 : cs.progress);
-  }
+  const fmtDelta = (d) => `${d > 0 ? "+" : d < 0 ? "−" : ""}${Math.abs(Math.round(d))}`;
+  const deg = (x) => `${x > 0 ? "+" : x < 0 ? "−" : ""}${Math.abs(Math.round(x || 0))}°`;
 
   function renderLog() {
     const ev = S.events || [];
     const newest = ev.length ? ev[0].ts : 0;
     if (newest === lastEventTs && $("#eventLog").children.length) return;
-    if (lastEventTs && newest > lastEventTs && ev[0].action) {
-      const b = document.querySelector(`.toggle[data-action="${ev[0].action}"]`);
-      if (b) { b.classList.remove("flash"); void b.offsetWidth; b.classList.add("flash"); }
-    }
     lastEventTs = newest;
     $("#eventLog").innerHTML = ev.length ? ev.map((e) => {
       const t = new Date(e.ts * 1000).toLocaleTimeString("ru-RU");
-      const how = e.source === "gesture" ? ` · жест <span class="chip">${e.combo}</span>` : e.source === "manual" ? " · вручную" : "";
+      const how = e.source === "gesture" ? ` · жест «${comboWords(e.combo, S.finger_map)}»` : e.source === "manual" ? " · вручную" : "";
       return `<li class="${e.source === "system" ? "sys" : ""}"><span class="time">${t}</span><span>${e.text}${how}</span></li>`;
     }).join("") : `<li class="muted">Пока ничего не произошло</li>`;
   }
@@ -262,25 +232,27 @@
     if (key !== tableKey) {
       tableKey = key;
       $("#chBody").innerHTML = chans.map((_, i) => `<tr><td><span class="swatch" style="background:${CHANNEL_COLORS[i]}"></span>S${i + 1}</td>
-        <td>${fname(map[i] || "")}</td><td></td><td></td><td></td><td></td><td></td><td></td></tr>`).join("");
+        <td>${fname(map[i] || "")}</td><td></td><td></td><td></td><td></td><td></td><td></td><td></td></tr>`).join("");
     }
     const rows = $("#chBody").children;
     chans.forEach((ch, i) => {
       const td = rows[i].children;
       td[2].textContent = ch.raw ?? "—";
       td[3].textContent = ch.filtered ?? "—";
-      td[4].textContent = ch.stale ? "—" : pct(ch.bend);
-      td[5].textContent = ch.bit;
+      const base = ch.cal.open ?? ch.rest;
+      td[4].textContent = ch.raw != null && base != null ? fmtDelta(ch.raw - base) : "—";
+      td[5].textContent = ch.stale ? "—" : pct(ch.bend);
+      td[6].textContent = ch.stale ? "—" : bendWord(ch.bend);
       const mode = ch.stale ? "stale" : ch.mode;
       const html = `<span class="pill ${mode}">${ch.stale ? "нет данных" : MODE_TEXT[ch.mode] || ch.mode}</span>`;
-      if (td[6].innerHTML !== html) td[6].innerHTML = html;
-      td[7].textContent = ch.cal.open != null || ch.cal.fist != null
+      if (td[7].innerHTML !== html) td[7].innerHTML = html;
+      td[8].textContent = ch.cal.open != null || ch.cal.fist != null
         ? `${ch.cal.open != null ? Math.round(ch.cal.open) : "—"} / ${ch.cal.fist != null ? Math.round(ch.cal.fist) : "—"}` : "—";
     });
-    const auto = chans.some((c) => c.mode === "uncalibrated" && !c.stale);
+    const cs = calibrationStatus(chans);
     $("#sigHint").textContent = S.mode === "values"
-      ? (auto ? "Каналы без калибровки: держите ладонь раскрытой при подключении, затем согните пальцы — включится автокалибровка. Точнее — кнопки «Ладонь раскрыта» и «Кулак сжат»." : "")
-      : S.mode === "bits" ? "Перчатка присылает готовые биты 0/1 — графики показывают только состояния." : "";
+      ? (cs.cls === "warn" ? "Без калибровки сгиб считается по автокалибровке (от уровня при подключении) — это приблизительно. Нажмите «Калибровка…»: 3 с ладонь, 3 с кулак." : "")
+      : S.mode === "bits" ? "Перчатка присылает готовые 0/1 — графики показывают только состояния." : "";
   }
 
   function renderSignalsToolbar() {
@@ -290,10 +262,9 @@
     btn.classList.toggle("rec-on", r.active);
     $("#recStatus").textContent = r.active ? `${r.file} · строк: ${r.rows}` : (r.file ? `последняя: ${r.file}` : "");
     const calOk = S.mode === "values";
-    $("#calOpen").disabled = $("#calFist").disabled = !calOk || !!S.calibrating;
-    $("#calStatus").textContent = S.calibrating
-      ? `Замер «${S.calibrating === "open" ? "ладонь" : "кулак"}»… держите руку неподвижно`
-      : S.last_calibration ? `Откалибровано каналов: ${S.last_calibration.valid_channels} из ${S.n_channels}` : (calOk ? "" : "нужен поток значений АЦП");
+    $("#calWizardBtn").disabled = $("#openWizard").disabled = !calOk;
+    const cs = calibrationStatus(S.channels || []);
+    $("#calStatus").textContent = calOk ? cs.text : "нужен поток значений АЦП";
   }
 
   function renderFingerMap(n, map, roles) {
@@ -310,20 +281,12 @@
         <label class="check"><input type="checkbox" data-role="cmd" data-ch="${i}" ${role(i).cmd ? "checked" : ""}> команды</label></div>`).join("");
     const r = roles.slice(0, shown);
     const warn = !r.length ? "" : !r.some((x) => x.grip) ? "Нет ни одного пальца сжатия — захват не будет следовать за рукой."
-      : !r.some((x) => x.cmd && !x.grip) ? "Нет пальцев «только команды» — пока управление активно, жесты не работают (ARM снимается кнопкой)." : "";
+      : !r.some((x) => x.cmd && !x.grip) ? "Нет пальцев «только команды» — пока управление активно, жесты не работают." : "";
     $("#rolesWarn").textContent = warn; $("#rolesWarn").hidden = !warn;
   }
 
-  function armedLabel(combo) {
-    const a = S.bindings[combo];
-    if (!a) return "";
-    const ab = (S.command || {}).armed_bindings || {};
-    const ok = Object.entries(ab).some(([proj, act_]) => act_ === a && [...proj].every((ch, i) => ch === "0" || combo[i] === "1"));
-    return `<div class="bc-armed ${ok ? "on" : ""}">${ok ? "✓ работает при ARM" : "при ARM — нет"}</div>`;
-  }
-
   function renderBindings(n, map) {
-    const key = JSON.stringify([n, map, S.bindings, META.actions.length, (S.command || {}).armed_bindings]);
+    const key = JSON.stringify([n, map, S.bindings, META.actions.length]);
     if (key !== bindKey) {
       bindKey = key;
       const opts = (sel) => `<option value="">— нет команды —</option>` +
@@ -332,9 +295,9 @@
       grid.innerHTML = n ? combosFor(n).map((c) => {
         const rest = !c.includes("1");
         return `<div class="bind-card ${S.bindings[c] ? "bound" : ""}" data-combo="${c}"><svg></svg>
-          <div class="bc-combo">${c}</div><div class="small muted">${bentNames(c, map)}</div>
-          ${rest ? `<div class="bc-rest">покой — без команды</div>` : `<select data-combo="${c}">${opts(S.bindings[c])}</select>${armedLabel(c)}`}</div>`;
-      }).join("") : `<p class="muted">Подключите перчатку или демо — появятся все комбинации для числа каналов.</p>`;
+          <div class="bc-words">${comboWords(c, map)}</div>
+          ${rest ? `<div class="bc-rest">покой — без команды</div>` : `<select data-combo="${c}">${opts(S.bindings[c])}</select>`}</div>`;
+      }).join("") : `<p class="muted">Подключите перчатку или демо — появятся все сочетания для числа каналов.</p>`;
       $$("#bindGrid .bind-card").forEach((card) => {
         const hv = new HandView(card.querySelector("svg"), { static: true });
         hv.set(bendsByFinger([...card.dataset.combo].map(Number), map));
@@ -342,6 +305,83 @@
     }
     $$("#bindGrid .bind-card").forEach((c) => c.classList.toggle("live", c.dataset.combo === S.committed));
   }
+
+  // ---------------- мастер калибровки ----------------
+  // шаги: 1 «ладонь» (отсчёт 3-2-1 → замер 3 с) → 2 «кулак» (так же) → 3 итог по каналам → «Сохранить» / «Повторить»
+  const WZ = { open: false, phase: "intro", countdown: 0, timer: null };
+  const OPEN_POSE = { thumb: 0, index: 0, middle: 0, ring: 0, pinky: 0 };
+  const FIST_POSE = { thumb: 1, index: 1, middle: 1, ring: 1, pinky: 1 };
+  function openWizard() {
+    if (!S || S.mode !== "values") return toast("Калибровка возможна только при потоке значений АЦП — подключите перчатку", true);
+    WZ.open = true; WZ.phase = "intro"; $("#wizard").hidden = false;
+    api("/api/calibration/wizard-cancel", { method: "POST" }).catch(() => {});
+    renderWizard();
+  }
+  function closeWizard() {
+    clearInterval(WZ.timer); WZ.open = false; $("#wizard").hidden = true;
+    api("/api/calibration/wizard-cancel", { method: "POST" }).catch(() => {});
+  }
+  function startStep(target) {
+    clearInterval(WZ.timer);
+    WZ.phase = "count-" + target; WZ.countdown = 3;
+    if (S.source.kind === "mock") {                    // в демо «рука» сама принимает позу — мастер проверяется без перчатки
+      api("/api/mock", { method: "POST", body: { bends: Array(S.n_channels).fill(target === "fist" ? 1 : 0) } }).catch(() => {});
+      $("#mockAuto").checked = $("#mockTour").checked = false;
+    }
+    renderWizard();
+    WZ.timer = setInterval(async () => {
+      WZ.countdown -= 1;
+      if (WZ.countdown <= 0) {
+        clearInterval(WZ.timer);
+        WZ.phase = "capture-" + target;
+        try { await api(`/api/calibration/wizard/${target}`, { method: "POST" }); }
+        catch (e) { toast(e.message, true); WZ.phase = "intro"; }
+      }
+      renderWizard();
+    }, 1000);
+  }
+  function renderWizard() {
+    if (!WZ.open || !S) return;
+    const w = S.wizard || { step: "idle" }, map = S.finger_map;
+    const fist = WZ.phase.endsWith("fist") || w.step === "open_done";
+    if (WZ.phase.startsWith("capture") && !w.capturing) WZ.phase = w.step === "review" ? "review" : w.step === "open_done" ? "between" : WZ.phase;
+    const review = w.step === "review";
+    const step = review ? 3 : fist ? 2 : 1;
+    $$(".wz-steps span").forEach((s) => s.classList.toggle("on", +s.dataset.step === step));
+    $("#wzPose").hidden = review; $("#wzReview").hidden = !review;
+    $("#wzGo").hidden = review || WZ.phase.startsWith("count") || WZ.phase.startsWith("capture");
+    $("#wzSave").hidden = $("#wzRetry").hidden = !review;
+    if (!review) {
+      wzHand.set(fist ? FIST_POSE : OPEN_POSE);
+      $("#wzTitle").textContent = fist ? "Сожмите кулак" : "Раскройте ладонь";
+      $("#wzSub").textContent = fist ? "Согните все пальцы с сенсорами до упора и держите 3 секунды, не шевелясь."
+        : "Выпрямите пальцы (ладонь расслаблена, пальцы прямые) и держите 3 секунды, не шевелясь.";
+      const capturing = WZ.phase.startsWith("capture") && w.capturing;
+      $("#wzCount").textContent = WZ.phase.startsWith("count") ? `через ${WZ.countdown}…` : capturing ? "держите…" : "";
+      $("#wzBar").style.width = capturing ? `${Math.round((w.progress || 0) * 100)}%` : "0%";
+      $("#wzGo").textContent = fist ? "Шаг 2: кулак" : "Начать";
+      return;
+    }
+    const rows = w.summary || [];
+    const html = rows.map((r, i) => `<tr class="g-${r.grade}"><td>S${i + 1}</td><td>${fname(map[i] || "")}</td>
+      <td>${r.open ?? "—"}</td><td>${r.fist ?? "—"}</td><td>${r.span == null ? "—" : fmtDelta(r.span)}</td><td>${r.noise}</td>
+      <td><span class="grade ${r.grade}">${r.grade_text}</span></td></tr>`).join("");
+    if ($("#wzRows").innerHTML !== html) $("#wzRows").innerHTML = html;
+    const bad = rows.filter((r) => r.grade === "flat" || r.grade === "no_data").length;
+    const weak = rows.filter((r) => r.grade === "weak").length;
+    $("#wzHint").textContent = bad ? `Каналов без изменения: ${bad}. Проверьте сенсор и провод (у такого канала сгиб будет приблизительным). Можно сохранить остальные или повторить.`
+      : weak ? "Есть каналы со слабым сигналом — сгиб будет шумнее. Попробуйте согнуть палец сильнее и повторить."
+      : "Все каналы в порядке. Размах — насколько меняется значение от ладони к кулаку; шум — разброс в неподвижной позе.";
+  }
+  $("#openWizard").addEventListener("click", openWizard);
+  $("#calWizardBtn").addEventListener("click", openWizard);
+  $("#wzCancel").addEventListener("click", closeWizard);
+  $("#wzGo").addEventListener("click", () => startStep(S.wizard && S.wizard.step === "open_done" ? "fist" : "open"));
+  $("#wzRetry").addEventListener("click", () => { api("/api/calibration/wizard-cancel", { method: "POST" }).catch(() => {}); WZ.phase = "intro"; startStep("open"); });
+  $("#wzSave").addEventListener("click", async () => {
+    try { const r = await api("/api/calibration/wizard-save", { method: "POST" }); toast(`Калибровка сохранена: каналов ${r.valid_channels} из ${S.n_channels}`); closeWizard(); }
+    catch (e) { toast(e.message, true); }
+  });
 
   // ---------------- демо ----------------
   function demoBits() { return (S.channels || []).map((c) => (c.bend >= 0.5 ? "1" : "0")).join(""); }
@@ -352,21 +392,27 @@
     const bits = [...demoBits()];
     bits[i] = bits[i] === "1" ? "0" : "1";
     api("/api/mock", { method: "POST", body: { bits: bits.join("") } }).catch((e) => toast(e.message, true));
-    $("#mockAuto").checked = false;
+    $("#mockAuto").checked = $("#mockTour").checked = false;
+  }
+  function demoAngles(body) {
+    api("/api/mock", { method: "POST", body }).catch(() => {});
+    $("#mockTour").checked = false;
+  }
+  const SLIDERS = { roll: "#rollSlider", pitch: "#pitchSlider", yaw: "#yawSlider" };
+  for (const [axis, sel] of Object.entries(SLIDERS)) {
+    $(sel).addEventListener("input", (e) => {
+      $(sel.replace("Slider", "Val")).textContent = deg(+e.target.value);
+      demoAngles({ [axis]: +e.target.value });
+    });
   }
 
   // ---------------- обработчики ----------------
-  document.addEventListener("click", async (e) => {
-    const t = e.target.closest(".toggle");
-    if (t) { try { await api(`/api/actions/${t.dataset.action}/toggle`, { method: "POST" }); } catch (err) { toast(err.message, true); } }
-  });
-
   document.addEventListener("change", async (e) => {
     const t = e.target;
     try {
       if (t.matches("select[data-combo]")) {
         await api("/api/bindings", { method: "POST", body: { combo: t.dataset.combo, action_id: t.value || null } });
-        toast(t.value ? `Жест ${t.dataset.combo} → ${act(t.value).title}` : `Привязка ${t.dataset.combo} снята`);
+        toast(t.value ? `«${comboWords(t.dataset.combo, S.finger_map)}» → ${act(t.value).title}` : "Привязка снята");
       } else if (t.matches("input[data-role]")) {
         const roles = (S.roles || []).map((r) => ({ ...r }));
         roles[+t.dataset.ch][t.dataset.role] = t.checked;
@@ -384,6 +430,10 @@
         await api("/api/settings", { method: "POST", body: { debounce_ms: +t.value } });
       } else if (t.id === "mockAuto") {
         await api("/api/mock", { method: "POST", body: { auto: t.checked } });
+        if (t.checked) $("#mockTour").checked = false;
+      } else if (t.id === "mockTour") {
+        await api("/api/mock", { method: "POST", body: { tour: t.checked } });
+        if (t.checked) $("#mockAuto").checked = false;
       } else if (t.id === "bleOnlyNamed") {
         renderBle();
       } else if (t.id === "showRaw") {
@@ -401,20 +451,21 @@
     } catch (err) { toast(err.message, true); }
   });
 
+  $$("#chartMode button").forEach((b) => b.addEventListener("click", () => {
+    $$("#chartMode button").forEach((x) => x.classList.toggle("active", x === b));
+    chart.mode = b.dataset.mode;
+    $("#showRawLabel").hidden = chart.mode !== "raw";
+  }));
+
   $("#gripSlider").addEventListener("input", (e) => {
     const v = +e.target.value / 100;
     api("/api/mock", { method: "POST", body: { bends: Array(S.n_channels || 5).fill(v) } }).catch(() => {});
-    $("#mockAuto").checked = false;
+    $("#mockAuto").checked = $("#mockTour").checked = false;
   });
 
-  $("#imuZero").addEventListener("click", () => api("/api/imu/zero", { method: "POST" }).then(() => toast("Положение обнулено")).catch((e) => toast(e.message, true)));
+  $("#imuZero").addEventListener("click", () => api("/api/imu/zero", { method: "POST" }).then(() => toast("Поворот обнулён: текущее направление пальцев — «в экран»")).catch((e) => toast(e.message, true)));
   $("#imuCal").addEventListener("click", () => api("/api/imu/calibrate", { method: "POST" }).catch((e) => toast(e.message, true)));
-  function demoAngles(body) {
-    api("/api/mock", { method: "POST", body }).catch(() => {});
-    $("#mockAuto").checked = false;
-  }
-  $("#rollSlider").addEventListener("input", (e) => demoAngles({ roll: +e.target.value }));
-  $("#pitchSlider").addEventListener("input", (e) => demoAngles({ pitch: +e.target.value }));
+  $("#viewReset").addEventListener("click", () => { if (hand3d) hand3d.resetView(); });
 
   $$("#srcKind button").forEach((btn) => btn.addEventListener("click", () => {
     $$("#srcKind button").forEach((x) => x.classList.toggle("active", x === btn));
@@ -440,7 +491,7 @@
   $("#bleList").addEventListener("click", async (e) => {
     const b = e.target.closest("[data-ble]"); if (!b) return;
     b.disabled = true; b.textContent = "Подключаюсь…";
-    try { await api("/api/connect", { method: "POST", body: { kind: "ble", address: b.dataset.ble, name: b.dataset.name || null } }); chart.clear(); toast("Перчатка подключена"); }
+    try { await api("/api/connect", { method: "POST", body: { kind: "ble", address: b.dataset.ble, name: b.dataset.name || null } }); chart.clear(); toast("Перчатка подключена"); location.hash = "#hand"; }
     catch (err) { toast(err.message, true); }
     finally { b.disabled = false; b.textContent = "Подключить"; }
   });
@@ -462,24 +513,21 @@
   });
 
   $("#mockStart").addEventListener("click", async () => {
-    try { await api("/api/connect", { method: "POST", body: { kind: "mock", n_channels: +$("#mockN").value } }); chart.clear(); toast("Демо-режим включён"); location.hash = "#control"; }
+    try { await api("/api/connect", { method: "POST", body: { kind: "mock", n_channels: +$("#mockN").value } }); chart.clear(); toast("Демо-режим включён"); location.hash = "#hand"; }
     catch (err) { toast(err.message, true); }
   });
   $("#disconnectBtn").addEventListener("click", () => api("/api/disconnect", { method: "POST" }).catch((e) => toast(e.message, true)));
-  $("#resetActions").addEventListener("click", () => api("/api/actions/reset", { method: "POST" }).catch((e) => toast(e.message, true)));
   $("#clearBindings").addEventListener("click", () => api("/api/bindings", { method: "DELETE" }).then(() => toast("Привязки удалены")).catch((e) => toast(e.message, true)));
 
-  // калибровка, запись, воспроизведение
-  $("#calOpen").addEventListener("click", () => api("/api/calibration/open", { method: "POST" }).catch((e) => toast(e.message, true)));
-  $("#calFist").addEventListener("click", () => api("/api/calibration/fist", { method: "POST" }).catch((e) => toast(e.message, true)));
-  $("#calReset").addEventListener("click", () => api("/api/calibration", { method: "DELETE" }).catch((e) => toast(e.message, true)));
+  // калибровка (сброс), запись, воспроизведение
+  $("#calReset").addEventListener("click", () => api("/api/calibration", { method: "DELETE" }).then(() => toast("Калибровка сброшена")).catch((e) => toast(e.message, true)));
   $("#recBtn").addEventListener("click", async () => {
     try {
       if (S.recording.active) { const r = await api("/api/recording/stop", { method: "POST" }); toast(`Сохранено: data/recordings/${r.file}`); refreshRecordings(); }
       else await api("/api/recording/start", { method: "POST" });
     } catch (err) { toast(err.message, true); }
   });
-  // фильтрация: пресеты конвейера и свой JSON (dsp, этап 3)
+  // фильтрация: пресеты конвейера и свой JSON (dsp, этап 3) — в «Настройки → Дополнительно»
   let PIPE = { presets: [], filters: [] }, pipeKey = "";
   async function loadPipelines() {
     try { PIPE = await api("/api/pipelines"); } catch (e) { return; }
@@ -562,12 +610,12 @@
       $("#protoCmd").textContent = kind === "rest" ? "Покой — ладонь раскрыта" : kind === "bend" ? `Согнуть ${who} (${bendNo} из 5)` : "Разогнуть";
       $("#protoCmd").className = "proto-cmd" + (kind === "bend" ? " bend" : "");
       $("#protoLeft").textContent = Math.ceil(acc + dur - el);
-      $("#protoBar").style.width = pct(el / total);
+      $("#protoBar").style.width = `${Math.round((el / total) * 100)}%`;
       if (i !== lastPhase && S.source.kind === "mock") {        // в демо пальцы сгибаются сами — проверка без перчатки
         const b = Array(S.n_channels).fill(0);
         if (kind === "bend") (ch === "all" ? b.fill(1) : (b[+ch] = 1));
         api("/api/mock", { method: "POST", body: { bends: b } }).catch(() => {});
-        $("#mockAuto").checked = false;
+        $("#mockAuto").checked = $("#mockTour").checked = false;
       }
       lastPhase = i;
     };
@@ -590,21 +638,26 @@
   });
   $("#chartPause").addEventListener("click", (e) => { chart.paused = !chart.paused; e.target.textContent = chart.paused ? "Продолжить" : "Пауза"; });
 
-  // клавиши 1..5 — согнуть/разогнуть палец канала в демо-режиме
+  // клавиши: 1..5 — согнуть/разогнуть палец канала в демо, стрелки — кисть, Esc — закрыть мастер
   document.addEventListener("keydown", (e) => {
-    if (!S || S.source.kind !== "mock" || ["INPUT", "SELECT", "TEXTAREA"].includes(document.activeElement.tagName)) return;
+    if (e.key === "Escape" && WZ.open) return closeWizard();
+    if (!S || S.source.kind !== "mock" || WZ.open || ["INPUT", "SELECT", "TEXTAREA"].includes(document.activeElement.tagName)) return;
     const k = parseInt(e.key, 10);
     if (k >= 1 && k <= S.n_channels) demoToggleFinger(S.finger_map[k - 1]);
-    const arrows = { ArrowLeft: ["rollSlider", -10], ArrowRight: ["rollSlider", 10], ArrowUp: ["pitchSlider", 10], ArrowDown: ["pitchSlider", -10] };
-    if (arrows[e.key] && location.hash !== "#signals" && location.hash !== "#settings") {
+    const arrows = { ArrowLeft: ["rollSlider", -15], ArrowRight: ["rollSlider", 15], ArrowUp: ["pitchSlider", 15], ArrowDown: ["pitchSlider", -15] };
+    if (arrows[e.key] && !["#signals", "#settings"].includes(location.hash)) {
       e.preventDefault();
       const [id, step] = arrows[e.key], sl = $("#" + id);
       sl.value = Math.max(+sl.min, Math.min(+sl.max, +sl.value + step));
-      demoAngles(id === "rollSlider" ? { roll: +sl.value } : { pitch: +sl.value });
+      sl.dispatchEvent(new Event("input"));
     }
   });
 
   // ---------------- старт ----------------
+  // высота шапки — для экрана «Рука» на всю высоту окна
+  const setTopbar = () => document.documentElement.style.setProperty("--topbar-h", `${$(".topbar").offsetHeight}px`);
+  new ResizeObserver(setTopbar).observe($(".topbar"));
+
   (async function init() {
     showTab();
     try { META = await api("/api/meta"); $("#ver").textContent = "v" + META.version; } catch (e) { /* сервер стартует */ }

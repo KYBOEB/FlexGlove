@@ -27,10 +27,17 @@ def test_es_modules_served_with_javascript_mime(tmp_path):
 
     from flexglove.app import create_app
     with TestClient(create_app(tmp_path / "t.db")) as c:
-        for path in ("/static/hand3d.js", "/static/vendor/three/three.module.min.js"):
+        for path in ("/static/hand3d.js", "/static/handpose.js", "/static/vendor/three/three.module.min.js",
+                     "/static/vendor/three/addons/loaders/GLTFLoader.js",
+                     "/static/vendor/three/addons/controls/OrbitControls.js",
+                     "/static/vendor/three/addons/utils/BufferGeometryUtils.js"):
             r = c.get(path)
             assert r.status_code == 200 and "javascript" in r.headers["content-type"]
         html = c.get("/").text
-        assert '<script type="module" src="/static/hand3d.js">' in html
-    assert "three.module.min.js" in (WEB / "hand3d.js").read_text(encoding="utf-8")
+        assert '<script type="module" src="/static/hand3d.js?v=' in html
+        for model in ("right.glb", "left.glb"):                 # модель руки generic-hand (D-27)
+            r = c.get(f"/static/vendor/models/generic-hand/{model}")
+            assert r.status_code == 200 and r.content[:4] == b"glTF"
+    assert 'from "three"' in (WEB / "hand3d.js").read_text(encoding="utf-8")
     assert "MIT" in (WEB / "vendor" / "three" / "LICENSE").read_text(encoding="utf-8")
+    assert "MIT" in (WEB / "vendor" / "models" / "generic-hand" / "LICENSE.md").read_text(encoding="utf-8")
