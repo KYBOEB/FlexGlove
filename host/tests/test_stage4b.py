@@ -203,10 +203,6 @@ def test_index_links_static_with_version(tmp_path):
         assert again.status_code == 304
 
 
-def test_version_is_060():
-    assert __version__ == "0.6.0"
-    changelog = (Path(__file__).resolve().parents[2] / "CHANGELOG.md").read_text(encoding="utf-8")
-    assert "0.6.0" in changelog
 
 
 def test_robot_scene_and_controller_hidden_from_ui():

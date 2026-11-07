@@ -19,6 +19,17 @@
    Камера стоит неподвижно в мире (верх экрана = верх комнаты) и смотрит на руку немного сверху-сбоку, как на свою:
    рука опущена → на экране пальцы вниз; ладонь вверх → ладонь вверх. Мышь вращает только вид (OrbitControls).
 
+   Кадрирование (этап 4в): по модели считается ограничивающая сфера кисти (центр — середина рамки вершин, радиус —
+   до самой дальней вершины). Кисть вращается вокруг центра сферы, поэтому при любом повороте остаётся внутри неё;
+   камера ставится на расстояние, при котором сфера занимает FRAME_FILL высоты видимой части сцены:
+   d = r / (FRAME_FILL · tg(fov/2)) (и не ближе, чем нужно по ширине). Видимая часть — окно без строки углов сверху
+   и полосы демо снизу (setInsets); центр кадра смещается в её середину (camera.setViewOffset).
+   Пересчёт — при загрузке модели, смене руки и изменении размера окна; «Вид по умолчанию» — тот же кадр.
+
+   Тень (этап 4в): мягкое пятно прямо под рукой. Плоскость пятна каждый кадр опускается под нижнюю точку кисти
+   (по костям, с запасом на толщину пальцев), размер и поворот пятна — по «следу» костей на полу (главные оси
+   облака точек). Самозатенение пальцев на ладони даёт основной свет — так сгибы читаются на белом материале.
+
    Плавность: поза догоняет цель с k = 1 − exp(−dt/τ), τ = 50 мс (не зависит от частоты кадров). */
 import * as THREE from "three";
 import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
@@ -43,13 +54,14 @@ const Q_WORLD_TO_SCENE = new THREE.Quaternion().setFromRotationMatrix(
   new THREE.Matrix4().set(0, -1, 0, 0, 0, 0, 1, 0, -1, 0, 0, 0, 0, 0, 0, 1));
 // поза без данных IMU: пальцы вверх, тыльной стороной к зрителю (поворот вокруг Y мира на −90°)
 const Q_DEFAULT_WORLD = [Math.SQRT1_2, 0, -Math.SQRT1_2, 0];
-// камера: чуть сверху (≈ 18°) и правее (≈ 25°) — рука объёмная, но видна «как своя»; кисть с предплечьем
-// целиком в кадре при любом наклоне. Центр вращения на экране — середина кисти (PIVOT_X см от запястья к пальцам):
-// тогда рука не уезжает за край кадра, а повороты те же — ориентация не зависит от выбора центра.
-const CAMERA_POS = new THREE.Vector3(31, 22, 66);
-const CAMERA_TARGET = new THREE.Vector3(0, -2, 0);
-const PIVOT_X = 4.5;
-const FOREARM_LEN = 10;
+// камера «Вида по умолчанию»: правее на VIEW_AZIMUTH и сверху на VIEW_ELEVATION — в стартовой позе демо
+// (пальцы вверх, тыльной стороной к зрителю) видны все 5 пальцев и их сгиб к ладони.
+const VIEW_AZIMUTH = 25, VIEW_ELEVATION = 18;            // градусы
+const FRAME_FILL = 0.78;       // доля высоты видимой части, которую занимает сфера кисти (сама кисть ≈ 0,6–0,7)
+const FRAME_FILL_W = 0.9;      // и не больше этой доли ширины
+const FOV = 30;
+const KEY_DIR = new THREE.Vector3(-35, 40, 28).normalize();   // основной свет: слева-сверху-спереди
+const SHADOW_GAP = 1.1;        // см: кости идут по оси пальцев, поверхность ниже примерно на столько
 
 class Hand3D {
   constructor(container) {
@@ -60,52 +72,43 @@ class Hand3D {
     this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    this.renderer.toneMappingExposure = 1.0;
+    this.renderer.toneMappingExposure = 1.15;          // белый матовый, как на референсе
     container.appendChild(this.renderer.domElement);
 
     this.scene = new THREE.Scene();
-    this.camera = new THREE.PerspectiveCamera(30, 1, 1, 400);
-    this.camera.position.copy(CAMERA_POS);
+    this.camera = new THREE.PerspectiveCamera(FOV, 1, 1, 600);
     this.controls = new OrbitControls(this.camera, this.renderer.domElement);
-    this.controls.target.copy(CAMERA_TARGET);
     this.controls.enablePan = false;
     this.controls.enableDamping = true;
-    this.controls.minDistance = 30;
-    this.controls.maxDistance = 140;
-    this.controls.update();
-    this.controls.saveState();
+    this.radius = 10;                          // радиус сферы кисти, см (уточняется по модели)
+    this.insets = { top: 0, bottom: 0 };
+    this._viewDir(VIEW_AZIMUTH, VIEW_ELEVATION);
 
-    // мягкий рассеянный свет + основной источник сверху-слева с мягкой тенью + заполняющий справа
-    this.scene.add(new THREE.HemisphereLight(0xffffff, 0xc9ccd2, 1.7));
-    const key = new THREE.DirectionalLight(0xffffff, 1.6);
-    key.position.set(-12, 60, 22);
-    key.castShadow = true;
+    // рассеянный свет слабее, основной (сверху-слева, сбоку) сильнее — у белой руки тени между пальцами и у суставов
+    this.scene.add(new THREE.HemisphereLight(0xffffff, 0xaeb3bc, 0.7));
+    const key = (this.key = new THREE.DirectionalLight(0xffffff, 3.0));
+    key.castShadow = true;                     // только самозатенение руки: пола, который ловит тень, нет
     key.shadow.mapSize.set(2048, 2048);
-    key.shadow.radius = 8;
-    key.shadow.bias = -0.0004;
-    key.shadow.normalBias = 0.02;
-    Object.assign(key.shadow.camera, { left: -30, right: 30, top: 30, bottom: -30, near: 1, far: 140 });
-    this.scene.add(key);
-    const fill = new THREE.DirectionalLight(0xffffff, 0.5);
+    key.shadow.radius = 4;
+    key.shadow.bias = -0.0005;
+    key.shadow.normalBias = 0.03;
+    this.scene.add(key, key.target);
+    const fill = new THREE.DirectionalLight(0xffffff, 0.45);
     fill.position.set(26, 6, 24);
     this.scene.add(fill);
-    const rim = new THREE.DirectionalLight(0xffffff, 0.35);
+    const rim = new THREE.DirectionalLight(0xffffff, 0.4);
     rim.position.set(0, 10, -40);
     this.scene.add(rim);
+    this._fitLight();
 
-    // невидимый «пол» под рукой: на нём видна только мягкая тень
-    const floor = new THREE.Mesh(new THREE.PlaneGeometry(220, 220), new THREE.ShadowMaterial({ opacity: 0.13 }));
-    floor.rotation.x = -Math.PI / 2;
-    floor.position.y = -22;
-    floor.receiveShadow = true;
-    this.scene.add(floor);
+    this.blob = this._buildBlobShadow();
+    this.scene.add(this.blob);
 
     this.material = new THREE.MeshStandardMaterial({ color: 0xf4f4f2, roughness: 0.86, metalness: 0.0 });
 
     this.pivot = new THREE.Group();            // оси pivot = оси руки; центр — середина кисти
     this.scene.add(this.pivot);
-    this.handGroup = new THREE.Group();        // запястье в начале координат этой группы
-    this.handGroup.position.x = -PIVOT_X;
+    this.handGroup = new THREE.Group();        // запястье в начале координат этой группы; центр сферы — в pivot
     this.pivot.add(this.handGroup);
 
     this.qTarget = new THREE.Quaternion();
@@ -147,33 +150,23 @@ class Hand3D {
 
   _useModel(model) {
     if (this.model) this.handGroup.remove(this.model.root);
-    if (this.forearm) this.handGroup.remove(this.forearm);
     this.model = model;
     this.handGroup.add(model.root);
-    this.forearm = this._buildForearm(model.wristSize || { y: 6.0, z: 4.0 });
-    this.handGroup.add(this.forearm);
+    // центр вращения — центр сферы кисти; камера — под её размер
+    const sphere = model.sphere || this._sphereOf(model.root);
+    this.handGroup.position.copy(sphere.center).negate();
+    this.radius = sphere.radius;
     this._applyGhost();
+    this._fit();
+    this._fitLight();
   }
 
-  // короткое предплечье, плавно растворяющееся к локтю: закрывает срез модели у запястья и показывает,
-  // откуда «растёт» рука (без резкого торца, который в позе «пальцы от себя» смотрел бы прямо в камеру)
-  _buildForearm({ y, z }) {
-    const r0 = (y / 2) * 0.97, r1 = r0 * 1.1;
-    const geo = new THREE.CylinderGeometry(r0, r1, FOREARM_LEN, 48, 8, true);
-    geo.rotateZ(Math.PI / 2);                  // ось цилиндра → −X руки: от запястья к локтю
-    geo.translate(-FOREARM_LEN / 2 + 1.0, 0, 0);
-    const c = document.createElement("canvas");
-    c.width = 4; c.height = 64;
-    const g = c.getContext("2d"), grad = g.createLinearGradient(0, 0, 0, 64);
-    grad.addColorStop(0, "#000"); grad.addColorStop(0.75, "#fff"); grad.addColorStop(1, "#fff");
-    g.fillStyle = grad; g.fillRect(0, 0, 4, 64);
-    const mat = this.material.clone();
-    mat.alphaMap = new THREE.CanvasTexture(c);
-    mat.transparent = true;               // глубину пишет: срез модели у запястья не просвечивает
-    const m = new THREE.Mesh(geo, mat);
-    m.scale.z = Math.min(1, (z / 2) / r0);      // предплечье сплюснуто, как запястье модели
-    m.renderOrder = -1;
-    return m;
+  // сфера по рамке объекта в осях руки (для запасной руки из примитивов)
+  _sphereOf(obj) {
+    this.handGroup.updateMatrixWorld(true);
+    const inv = this.handGroup.matrixWorld.clone().invert();
+    const box = new THREE.Box3().setFromObject(obj).applyMatrix4(inv);
+    return box.getBoundingSphere(new THREE.Sphere());
   }
 
   _prepareGltf(gltf) {
@@ -223,21 +216,26 @@ class Hand3D {
           diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.86, 0.90, 0.97), vGhost * 0.7);
           diffuseColor.a *= 1.0 - 0.35 * vGhost;`);
     };
+    mat.side = THREE.DoubleSide;              // срез у запястья: изнутри видна поверхность, а не «дыра»
     mesh.material = mat;
     mesh.castShadow = true;
     mesh.receiveShadow = true;
     mesh.frustumCulled = false;               // кости двигаются — исходная рамка модели не годится
 
-    // толщина запястья (для предплечья): вершины модели в осях руки ближе 1,2 см к запястью
+    // ограничивающая сфера кисти в осях руки: центр — середина рамки вершин, радиус — до самой дальней вершины
+    // (пальцы в модели прямые — это самая «длинная» поза, при сгибе кисть только помещается в сферу лучше)
     const pos = mesh.geometry.attributes.position, v = new THREE.Vector3();
     const M = toHand.clone().multiply(mesh.matrixWorld);
-    let y0 = Infinity, y1 = -Infinity, z0 = Infinity, z1 = -Infinity;
-    for (let i = 0; i < pos.count; i++) {
-      v.fromBufferAttribute(pos, i).applyMatrix4(M);
-      if (v.x < 1.2) { y0 = Math.min(y0, v.y); y1 = Math.max(y1, v.y); z0 = Math.min(z0, v.z); z1 = Math.max(z1, v.z); }
-    }
-    const wristSize = isFinite(y0) ? { y: y1 - y0, z: z1 - z0 } : null;
-    return { root, chains, mesh, boneGhost, boneIndex, wristSize, kind: "gltf" };
+    const pts = [];
+    for (let i = 0; i < pos.count; i++) pts.push(v.fromBufferAttribute(pos, i).applyMatrix4(M).clone());
+    const center = new THREE.Box3().setFromPoints(pts).getCenter(new THREE.Vector3());
+    let r2 = 0;
+    for (const p of pts) r2 = Math.max(r2, p.distanceToSquared(center));
+    const sphere = new THREE.Sphere(center, Math.sqrt(r2));
+    // точки для тени: все кости пальцев и запястье ± полширины ладони
+    const wristSide = (pts.reduce((m, p) => (p.x < 1.5 ? Math.max(m, Math.abs(p.y)) : m), 0) || 3) * 0.8;
+    const shadowBones = [byName.wrist, ...Object.values(chains).flatMap((c) => c.bones)];
+    return { root, chains, mesh, boneGhost, boneIndex, sphere, shadowBones, wristSide, kind: "gltf" };
   }
 
   _applyGhost() {
@@ -351,18 +349,112 @@ class Hand3D {
     for (const f of FINGERS) this.bendTarget[f] = this.sensed.has(f) ? Math.min(1, Math.max(0, bends?.[f] ?? 0)) : NEUTRAL_BEND;
   }
 
-  /** «Вид по умолчанию»: камера на исходное место (вращение мышью сбрасывается). */
+  /** «Вид по умолчанию»: камера сверху-сбоку на расстоянии кадрирования (вращение мышью сбрасывается). */
   resetView() {
-    this.controls.reset();
+    this._viewDir(VIEW_AZIMUTH, VIEW_ELEVATION);
+    this._fit();
+  }
+
+  /** Отступы сверху и снизу (px), которые закрыты подписями и полосой демо: рука центрируется в остальной части. */
+  setInsets({ top = 0, bottom = 0 } = {}) {
+    if (top === this.insets.top && bottom === this.insets.bottom) return;
+    this.insets = { top, bottom };
+    this._resize();
+  }
+
+  _viewDir(azimuthDeg, elevationDeg) {
+    const az = rad(azimuthDeg), el = rad(elevationDeg);
+    this.controls.target.set(0, 0, 0);
+    this.camera.position.set(Math.sin(az) * Math.cos(el), Math.sin(el), Math.cos(az) * Math.cos(el));
+  }
+
+  /** Расстояние камеры, при котором сфера кисти занимает FRAME_FILL высоты видимой части (и влезает по ширине). */
+  fitDistance() {
+    const w = this.container.clientWidth || 1, h = this.container.clientHeight || 1;
+    const hs = Math.max(80, h - this.insets.top - this.insets.bottom);
+    const tanV = Math.tan(rad(FOV / 2)), tanH = tanV * (w / h);
+    // экран по высоте при расстоянии d вмещает 2·d·tgV; видимой части нужна доля FRAME_FILL·hs/h
+    return Math.max(this.radius / (FRAME_FILL * (hs / h) * tanV), this.radius / (FRAME_FILL_W * tanH));
+  }
+
+  // направление взгляда сохраняется (повёрнутый мышью вид не сбрасывается), меняется только расстояние
+  _fit() {
+    const d = this.fitDistance();
+    const dir = this.camera.position.clone().sub(this.controls.target);
+    if (dir.lengthSq() < 1e-9) dir.set(0, 0, 1);
+    this.camera.position.copy(this.controls.target).addScaledVector(dir.normalize(), d);
+    this.controls.minDistance = d * 0.55;
+    this.controls.maxDistance = d * 2.5;
+    this.camera.near = Math.max(0.5, d - this.radius * 3);
+    this.camera.far = d + this.radius * 6;
+    this.camera.updateProjectionMatrix();
+    this.controls.update();
+  }
+
+  // теневая камера основного света — вплотную вокруг сферы кисти (чётче самозатенение, без обрезанных краёв)
+  _fitLight() {
+    const r = this.radius + 1.5, k = this.key;
+    k.position.copy(KEY_DIR).multiplyScalar(r * 4);
+    k.target.position.set(0, 0, 0);
+    Object.assign(k.shadow.camera, { left: -r, right: r, top: r, bottom: -r, near: r, far: r * 7 });
+    k.shadow.camera.updateProjectionMatrix();
   }
 
   _resize() {
     const w = this.container.clientWidth || 1, h = this.container.clientHeight || 1;
     this.renderer.setSize(w, h, false);
     this.camera.aspect = w / h;
-    // в узком окне отодвигаем камеру, чтобы рука помещалась и по ширине
-    this.camera.zoom = Math.min(1, (w / h) / 0.9);
-    this.camera.updateProjectionMatrix();
+    // центр кадра — середина видимой части: окно проекции сдвигается на половину разницы отступов
+    const dy = Math.round((this.insets.bottom - this.insets.top) / 2);
+    this.camera.setViewOffset(w, h, 0, dy, w, h);
+    this._fit();
+  }
+
+  // ---------------- тень-пятно ----------------
+  _buildBlobShadow() {
+    const c = document.createElement("canvas");
+    c.width = c.height = 128;
+    const g = c.getContext("2d"), grad = g.createRadialGradient(64, 64, 0, 64, 64, 64);
+    grad.addColorStop(0, "rgba(0,0,0,1)"); grad.addColorStop(0.45, "rgba(0,0,0,0.55)"); grad.addColorStop(1, "rgba(0,0,0,0)");
+    g.fillStyle = grad; g.fillRect(0, 0, 128, 128);
+    const mat = new THREE.MeshBasicMaterial({ map: new THREE.CanvasTexture(c), transparent: true, opacity: 0.3,
+      depthWrite: false, color: 0x30343c, toneMapped: false });
+    const m = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), mat);
+    m.rotation.x = -Math.PI / 2;
+    m.renderOrder = -2;
+    return m;
+  }
+
+  // пятно под нижней точкой кисти; размер и поворот — по главным осям «следа» костей на полу
+  _updateBlob() {
+    const m = this.model, blob = this.blob;
+    this.scene.updateMatrixWorld();
+    const pts = [], v = new THREE.Vector3();
+    if (m && m.kind === "gltf") {
+      for (const b of m.shadowBones) pts.push(b.getWorldPosition(new THREE.Vector3()));
+      for (const s of [-1, 1]) pts.push(v.set(0, s * m.wristSide, 0).applyMatrix4(this.handGroup.matrixWorld).clone());
+    } else if (m) {
+      const box = new THREE.Box3().setFromObject(m.root);
+      for (const x of [box.min.x, box.max.x]) for (const z of [box.min.z, box.max.z]) pts.push(new THREE.Vector3(x, box.min.y + SHADOW_GAP, z));
+    }
+    if (!pts.length) { blob.visible = false; return; }
+    let minY = Infinity, cx = 0, cz = 0;
+    for (const p of pts) { minY = Math.min(minY, p.y); cx += p.x; cz += p.z; }
+    cx /= pts.length; cz /= pts.length;
+    let sxx = 0, szz = 0, sxz = 0;
+    for (const p of pts) { const dx = p.x - cx, dz = p.z - cz; sxx += dx * dx; szz += dz * dz; sxz += dx * dz; }
+    const ang = 0.5 * Math.atan2(2 * sxz, sxx - szz);          // главная ось следа на полу
+    const ux = Math.cos(ang), uz = Math.sin(ang);
+    let a0 = Infinity, a1 = -Infinity, b0 = Infinity, b1 = -Infinity;
+    for (const p of pts) {
+      const dx = p.x - cx, dz = p.z - cz, a = dx * ux + dz * uz, b = -dx * uz + dz * ux;
+      a0 = Math.min(a0, a); a1 = Math.max(a1, a); b0 = Math.min(b0, b); b1 = Math.max(b1, b);
+    }
+    const pad = 2.2;                                             // толщина пальцев и мягкий край
+    blob.visible = true;
+    blob.position.set(cx + ux * (a0 + a1) / 2 - uz * (b0 + b1) / 2, minY - SHADOW_GAP, cz + uz * (a0 + a1) / 2 + ux * (b0 + b1) / 2);
+    blob.rotation.set(-Math.PI / 2, 0, -ang);
+    blob.scale.set(a1 - a0 + pad * 2, b1 - b0 + pad * 2, 1);
   }
 
   _loop(now) {
@@ -378,6 +470,7 @@ class Hand3D {
       this._poseFinger(f, this.bendCurrent[f]);
     }
     this.controls.update();
+    this._updateBlob();
     this.renderer.render(this.scene, this.camera);
   }
 }
