@@ -1,0 +1,4 @@
+Дополнения three.js r170 (npm three@0.170.0, examples/jsm), без изменений:
+  loaders/GLTFLoader.js, utils/BufferGeometryUtils.js (зависимость загрузчика), controls/OrbitControls.js.
+Импорт 'three' разрешается import map в index.html → /static/vendor/three/three.module.min.js.
+Лицензия: MIT (../LICENSE). Источник: https://registry.npmjs.org/three/-/three-0.170.0.tgz

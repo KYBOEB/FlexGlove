@@ -1,0 +1,10 @@
+Модель руки generic-hand (WebXR Input Profiles), правая и левая: right.glb, left.glb.
+Пакет: npm @webxr-input-profiles/assets 1.0.20, папка dist/profiles/generic-hand/.
+Источник: https://registry.npmjs.org/@webxr-input-profiles/assets/-/assets-1.0.20.tgz
+Лицензия: MIT (LICENSE.md рядом), Copyright (c) 2019 Amazon.
+Скелет по стандарту WebXR Hand Input: wrist, <палец>-metacarpal, -phalanx-proximal, -phalanx-intermediate,
+-phalanx-distal, -tip (у большого пальца нет intermediate). Кости не вложены друг в друга — каждая задана
+в системе «Armature», поэтому цепочки пальцев hand3d.js строит сам.
+SHA-256:
+  right.glb 291790c14f7f88a7f9bd35330c47392ed8e8d395ae6728f4bb7089f1bc1f2b96
+  left.glb  bc67783144944ea1cda54d9247885825ea5fb9d4651469fe7d00be517a5c2b87
