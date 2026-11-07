@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Literal
 
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
@@ -27,6 +27,23 @@ log = logging.getLogger("flexglove")
 # (hand3d.js, three.module.min.js). Задаём тип явно.
 mimetypes.add_type("text/javascript", ".js")
 WEB_DIR = Path(__file__).parent / "web"
+STATIC_VERSION_TOKEN = "__V__"     # в index.html заменяется на версию приложения: /static/app.js?v=0.6.0
+
+
+class RevalidatedStaticFiles(StaticFiles):
+    """Статика с Cache-Control: no-cache — браузер может хранить файлы, но перед использованием обязан
+    сверить их с сервером (ETag / Last-Modified, ответ 304 без тела). Так после обновления приложения
+    не бывает «новый index.html + старые app.js/style.css из кэша» (баг v0.5.0)."""
+
+    async def get_response(self, path, scope):
+        response = await super().get_response(path, scope)
+        response.headers["Cache-Control"] = "no-cache"
+        return response
+
+
+def render_index() -> str:
+    """index.html с версией в ссылках на статику (?v=…): новая версия — новые адреса — гарантированно свежие файлы."""
+    return (WEB_DIR / "index.html").read_text(encoding="utf-8").replace(STATIC_VERSION_TOKEN, __version__)
 DATA_DIR = Path(__file__).resolve().parents[2] / "data"
 DEFAULT_DB = DATA_DIR / "flexglove.db"
 
@@ -70,6 +87,7 @@ class MockRequest(BaseModel):
     bits: str | None = Field(default=None, pattern=r"^[01]{1,8}$")
     bends: list[float] | None = None
     auto: bool | None = None
+    tour: bool | None = None                                      # режим «обзор»: плавные движения кисти и пальцев
     roll: float | None = Field(default=None, ge=-180, le=180)     # имитация IMU: целевые углы кисти, °
     pitch: float | None = Field(default=None, ge=-180, le=180)
     yaw: float | None = Field(default=None, ge=-180, le=180)
@@ -150,9 +168,9 @@ def create_app(db_path: Path | str = DEFAULT_DB, demo: bool = False) -> FastAPI:
     # ---------- статика ----------
     @app.get("/")
     async def index():
-        return FileResponse(WEB_DIR / "index.html", headers={"Cache-Control": "no-store"})
+        return HTMLResponse(render_index(), headers={"Cache-Control": "no-store"})
 
-    app.mount("/static", StaticFiles(directory=WEB_DIR), name="static")
+    app.mount("/static", RevalidatedStaticFiles(directory=WEB_DIR), name="static")
 
     # ---------- служебное ----------
     @app.get("/api/ping")
@@ -202,9 +220,35 @@ def create_app(db_path: Path | str = DEFAULT_DB, demo: bool = False) -> FastAPI:
             state.source.set_auto(req.auto)
         if any(v is not None for v in (req.roll, req.pitch, req.yaw)):
             state.source.set_angles(req.roll, req.pitch, req.yaw)
-        return {"bits": state.source.bits, "auto": state.source.auto, "angles": state.source.angle_target}
+        if req.tour is not None:
+            state.source.set_tour(req.tour)
+        return {"bits": state.source.bits, "auto": state.source.auto, "tour": state.source.tour,
+                "angles": state.source.angle_target}
 
     # ---------- калибровка ----------
+    # мастер калибровки: шаг 1 — ладонь, шаг 2 — кулак, шаг 3 — итог → сохранить или повторить
+    @app.post("/api/calibration/wizard/{target}")
+    async def wizard_step(target: Literal["open", "fist"], duration: float | None = None):
+        if duration is not None and not 0.5 <= duration <= 10:
+            raise HTTPException(400, "Длительность замера — от 0,5 до 10 с")
+        try:
+            engine.wizard_start(target, duration)
+        except (RuntimeError, ValueError) as exc:
+            raise HTTPException(409, str(exc)) from exc
+        return engine.snapshot()["wizard"]
+
+    @app.post("/api/calibration/wizard-save")
+    async def wizard_save():
+        try:
+            return engine.wizard_save()
+        except RuntimeError as exc:
+            raise HTTPException(409, str(exc)) from exc
+
+    @app.post("/api/calibration/wizard-cancel")
+    async def wizard_cancel():
+        engine.wizard_cancel()
+        return engine.snapshot()["wizard"]
+
     @app.post("/api/calibration/{target}")
     async def calibrate(target: Literal["open", "fist"]):
         try:
