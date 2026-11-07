@@ -61,7 +61,7 @@
     if (!combo) return "—";
     const bits = [...combo];
     if (!bits.includes("1")) return "ладонь раскрыта";
-    if (bits.length > 1 && !bits.includes("0")) return "кулак";
+    if (bits.length >= 5 && !bits.includes("0")) return "кулак";        // кулак — только если сенсоры на всех пальцах
     return bits.map((c, i) => (c === "1" ? fname(map[i]) : null)).filter(Boolean).join(" + ");
   }
 

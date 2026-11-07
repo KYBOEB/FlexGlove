@@ -169,8 +169,7 @@ class Hand3D {
     g.fillStyle = grad; g.fillRect(0, 0, 4, 64);
     const mat = this.material.clone();
     mat.alphaMap = new THREE.CanvasTexture(c);
-    mat.transparent = true;
-    mat.depthWrite = false;
+    mat.transparent = true;               // глубину пишет: срез модели у запястья не просвечивает
     const m = new THREE.Mesh(geo, mat);
     m.scale.z = Math.min(1, (z / 2) / r0);      // предплечье сплюснуто, как запястье модели
     m.renderOrder = -1;
@@ -221,8 +220,8 @@ class Hand3D {
       shader.fragmentShader = shader.fragmentShader
         .replace("#include <common>", "#include <common>\nvarying float vGhost;")
         .replace("#include <color_fragment>", `#include <color_fragment>
-          diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.84, 0.88, 0.95), vGhost * 0.6);
-          diffuseColor.a *= 1.0 - 0.55 * vGhost;`);
+          diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.86, 0.90, 0.97), vGhost * 0.7);
+          diffuseColor.a *= 1.0 - 0.35 * vGhost;`);
     };
     mesh.material = mat;
     mesh.castShadow = true;
