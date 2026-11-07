@@ -111,6 +111,9 @@
     const isMock = src.kind === "mock" && connected;
     $("#demoStrip").hidden = !isMock;
     document.body.classList.toggle("demo", isMock);
+    if (isMock) syncDemo(src.demo);
+    // 3D-рука кадрируется по видимой части сцены: сверху — строка углов, снизу — полоса демо (если есть)
+    if (hand3d) hand3d.setInsets({ top: 36, bottom: isMock ? $("#demoStrip").offsetHeight + 22 : 12 });
 
     // сигналы
     if (S.mode !== "none") {
@@ -203,14 +206,16 @@
 
     // ориентация
     $("#imuBox").hidden = !ori;
+    // при почти вертикальных пальцах крен (поворот вокруг оси пальцев) по силе тяжести не определён — число скачет
+    const rollText = ori && Math.abs(ori.pitch) > 80 ? "—" : deg(ori?.roll);
     if (ori) {
       $("#imuPitch").textContent = `${deg(ori.pitch)} ${ori.pitch > 25 ? "вверх" : ori.pitch < -25 ? "вниз" : ""}`;
-      $("#imuRoll").textContent = deg(ori.roll); $("#imuYaw").textContent = deg(ori.yaw);
+      $("#imuRoll").textContent = rollText; $("#imuYaw").textContent = deg(ori.yaw);
       $("#imuStatus").textContent = ori.message && ori.message.includes("не принята") ? ori.message
         : `Поворот вокруг вертикали у MPU6050 медленно уходит (≈ ${String(ori.yaw_drift_deg_min).replace(".", ",")}°/мин) — направьте пальцы на экран и нажмите «Обнулить поворот».`;
     }
     $("#imuZero").disabled = $("#imuCal").disabled = !ori || !!ori.calibrating;
-    $("#stagePose").textContent = !ori ? "" : `пальцы ${deg(ori.pitch)} · крен ${deg(ori.roll)} · поворот ${deg(ori.yaw)}`;
+    $("#stagePose").textContent = !ori ? "" : `пальцы ${deg(ori.pitch)} · крен ${rollText} · поворот ${deg(ori.yaw)}`;
   }
   const fmtDelta = (d) => `${d > 0 ? "+" : d < 0 ? "−" : ""}${Math.abs(Math.round(d))}`;
   const deg = (x) => `${x > 0 ? "+" : x < 0 ? "−" : ""}${Math.abs(Math.round(x || 0))}°`;
@@ -326,7 +331,6 @@
     WZ.phase = "count-" + target; WZ.countdown = 3;
     if (S.source.kind === "mock") {                    // в демо «рука» сама принимает позу — мастер проверяется без перчатки
       api("/api/mock", { method: "POST", body: { bends: Array(S.n_channels).fill(target === "fist" ? 1 : 0) } }).catch(() => {});
-      $("#mockAuto").checked = $("#mockTour").checked = false;
     }
     renderWizard();
     WZ.timer = setInterval(async () => {
@@ -392,17 +396,29 @@
     const bits = [...demoBits()];
     bits[i] = bits[i] === "1" ? "0" : "1";
     api("/api/mock", { method: "POST", body: { bits: bits.join("") } }).catch((e) => toast(e.message, true));
-    $("#mockAuto").checked = $("#mockTour").checked = false;
   }
   function demoAngles(body) {
     api("/api/mock", { method: "POST", body }).catch(() => {});
-    $("#mockTour").checked = false;
   }
   const SLIDERS = { roll: "#rollSlider", pitch: "#pitchSlider", yaw: "#yawSlider" };
+  const sliderTouched = {};                              // когда ползунок двигали в последний раз (мс)
   for (const [axis, sel] of Object.entries(SLIDERS)) {
     $(sel).addEventListener("input", (e) => {
+      sliderTouched[axis] = performance.now();
       $(sel.replace("Slider", "Val")).textContent = deg(+e.target.value);
       demoAngles({ [axis]: +e.target.value });
+    });
+  }
+  // галочки и ползунки демо показывают фактический режим из состояния (в т. ч. включённый через API, этап 4в)
+  function syncDemo(demo) {
+    if (!demo) return;
+    $("#mockTour").checked = !!demo.tour;
+    $("#mockAuto").checked = !!demo.auto;
+    ["roll", "pitch", "yaw"].forEach((axis, i) => {
+      const sl = $(SLIDERS[axis]), v = Math.round(demo.angles?.[i] ?? 0);
+      if (performance.now() - (sliderTouched[axis] || 0) < 800 || +sl.value === v) return;   // не мешаем, пока двигают
+      sl.value = v;
+      $(SLIDERS[axis].replace("Slider", "Val")).textContent = deg(v);
     });
   }
 
@@ -430,10 +446,8 @@
         await api("/api/settings", { method: "POST", body: { debounce_ms: +t.value } });
       } else if (t.id === "mockAuto") {
         await api("/api/mock", { method: "POST", body: { auto: t.checked } });
-        if (t.checked) $("#mockTour").checked = false;
       } else if (t.id === "mockTour") {
         await api("/api/mock", { method: "POST", body: { tour: t.checked } });
-        if (t.checked) $("#mockAuto").checked = false;
       } else if (t.id === "bleOnlyNamed") {
         renderBle();
       } else if (t.id === "showRaw") {
@@ -460,7 +474,6 @@
   $("#gripSlider").addEventListener("input", (e) => {
     const v = +e.target.value / 100;
     api("/api/mock", { method: "POST", body: { bends: Array(S.n_channels || 5).fill(v) } }).catch(() => {});
-    $("#mockAuto").checked = $("#mockTour").checked = false;
   });
 
   $("#imuZero").addEventListener("click", () => api("/api/imu/zero", { method: "POST" }).then(() => toast("Поворот обнулён: текущее направление пальцев — «в экран»")).catch((e) => toast(e.message, true)));
@@ -615,7 +628,6 @@
         const b = Array(S.n_channels).fill(0);
         if (kind === "bend") (ch === "all" ? b.fill(1) : (b[+ch] = 1));
         api("/api/mock", { method: "POST", body: { bends: b } }).catch(() => {});
-        $("#mockAuto").checked = $("#mockTour").checked = false;
       }
       lastPhase = i;
     };

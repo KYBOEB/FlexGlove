@@ -7,7 +7,9 @@
 С этапа 4 демо имитирует и MPU6050 (протокол v0.3, строка "v1;…|ax;ay;az;gx;gy;gz"): кисть плавно следует за
 целевыми креном/тангажем/рысканьем (ползунки и клавиши в демо-полосе, в автопереборе — медленное покачивание),
 шум как у MPU6050 (гироскоп ≈ 0,03 °/с, акселерометр ≈ 3 мг), смещение нуля гироскопа ≈ 0,5 °/с,
-квантование как в протоколе (1 мг, 0,1 °/с). Исходная поза — ладонь вниз, пальцы вперёд, оси модуля = оси руки.
+квантование как в протоколе (1 мг, 0,1 °/с). Оси модуля = оси руки.
+Исходная поза демо (этап 4в, DEMO_START): рука вертикально, пальцы вверх, тыльной стороной к зрителю (тангаж +90°) —
+так сгибы пальцев на 3D-экране видны сразу. Ориентация по-прежнему абсолютная (D-28): меняется только стартовая цель.
 Углы целевой позы (этап 4б): крен > 0 — поворот вокруг оси пальцев (у правой руки большой палец вверх),
 тангаж > 0 — пальцы вверх, рысканье > 0 — пальцы влево.
 
@@ -36,6 +38,7 @@ IMU_GYRO_NOISE_DPS = 0.03
 IMU_ACC_NOISE_G = 0.003
 IMU_MAX_RATE_DPS = 120.0                # как быстро кисть догоняет цель
 IMU_TAU_S = 0.15
+DEMO_START = (0.0, 90.0, 0.0)           # крен, тангаж, рысканье исходной позы демо, °
 
 # автоперебор: (сгибы по каналам, длительность, с)
 AUTO_SEQUENCE = [
@@ -82,8 +85,8 @@ class MockSource(Source):
     def __init__(self, on_raw, on_status, n_channels: int = 5, rate_hz: float = 50.0, imu: bool = True):
         super().__init__(on_raw, on_status)
         self.imu = imu
-        self.angle_target = [0.0, 0.0, 0.0]       # крен, тангаж, рысканье, °
-        self.angles = [0.0, 0.0, 0.0]
+        self.angle_target = list(DEMO_START)      # крен, тангаж, рысканье, °
+        self.angles = list(DEMO_START)
         self._q_prev = None
         self.n = n_channels
         self.rate_hz = rate_hz
@@ -99,33 +102,45 @@ class MockSource(Source):
     def bits(self) -> str:
         return "".join("1" if t >= 0.5 else "0" for t in self.target)
 
+    def demo_state(self) -> dict:
+        """Режим демо для интерфейса (галочки «обзор» / «перебор жестов» и ползунки отражают его, этап 4в)."""
+        return {"auto": self.auto, "tour": self.tour, "angles": [round(a, 1) for a in self.angle_target]}
+
+    def _publish(self) -> None:
+        self.on_status(demo=self.demo_state())
+
     def set_bits(self, bits: str) -> None:
         self.target = [float(c == "1") for c in bits[: self.n].ljust(self.n, "0")]
         self.auto = self.tour = False
+        self._publish()
 
     def set_bends(self, bends: list[float]) -> None:
         self.target = [min(1.0, max(0.0, float(b))) for b in (bends + [0.0] * self.n)[: self.n]]
         self.auto = self.tour = False
+        self._publish()
 
     def set_auto(self, enabled: bool) -> None:
         self.auto = enabled
         if enabled:
             self.tour = False
+        self._publish()
 
     def set_tour(self, enabled: bool) -> None:
         """Режим «обзор»: плавные движения кисти и пальцев по ключевым позам (TOUR)."""
         self.tour = enabled
         if enabled:
             self.auto = False
-        else:                                           # остановиться в спокойной позе
+        else:                                           # остановиться в исходной позе демо
             self.target = [0.0] * self.n
-            self.angle_target = [0.0, 0.0, 0.0]
+            self.angle_target = list(DEMO_START)
+        self._publish()
 
     def set_angles(self, roll: float | None = None, pitch: float | None = None, yaw: float | None = None) -> None:
         for i, v in enumerate((roll, pitch, yaw)):
             if v is not None:
                 self.angle_target[i] = max(-170.0, min(170.0, float(v)))
         self.tour = False
+        self._publish()
 
     def imu_sample(self, t: float, dt: float) -> str:
         """Один отсчёт MPU6050 в единицах протокола v0.3: ax;ay;az (мг), gx;gy;gz (0,1 °/с)."""
@@ -157,7 +172,8 @@ class MockSource(Source):
 
     async def start(self) -> None:
         self.on_status(kind=self.kind, name="Демо-перчатка", connected=True,
-                       message=f"Демо-режим: {self.n} сенсоров{' + MPU6050' if self.imu else ''}, {self.rate_hz:.0f} Гц, данные имитируются")
+                       message=f"Демо-режим: {self.n} сенсоров{' + MPU6050' if self.imu else ''}, {self.rate_hz:.0f} Гц, данные имитируются",
+                       demo=self.demo_state())
         self._task = asyncio.create_task(self._run())
 
     async def _run(self) -> None:
@@ -193,4 +209,4 @@ class MockSource(Source):
         if self._task:
             self._task.cancel()
             await asyncio.gather(self._task, return_exceptions=True)
-        self.on_status(kind=None, name=None, connected=False, message="Не подключено")
+        self.on_status(kind=None, name=None, connected=False, message="Не подключено", demo=None)
