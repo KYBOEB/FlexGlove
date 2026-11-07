@@ -17,6 +17,7 @@ from pathlib import Path
 from typing import Any
 
 from .actions import ACTIONS
+from .calib_wizard import CalibrationWizard
 from .dsp.recognizers import CommandRecognizer, Role, Sample, armed_bindings, normalize_roles
 from .control import LINK_TIMEOUT_S, GripController
 from .parser import IMU_FIELDS, Frame, describe_raw, parse_message
@@ -66,6 +67,7 @@ class Engine:
             self.pipeline_setting = {"preset": presets.DEFAULT_PRESET}
             self.pipeline_config = presets.resolve(presets.DEFAULT_PRESET)
         self.capture: CalibrationCapture | None = None
+        self.wizard = CalibrationWizard()          # мастер калибровки «ладонь → кулак → итог» (этап 4б)
         self.last_calibration: dict[str, Any] | None = None
 
         self.controller = GripController()
@@ -191,6 +193,8 @@ class Engine:
         ch.update(value, now)
         if self.capture is not None and ch.filtered is not None:
             self.capture.add(i, ch.filtered)
+        if self.wizard.capture is not None:
+            self.wizard.add(i, ch.raw, ch.filtered)
 
     def _set_bits(self, bits: tuple[int, ...], now: float) -> None:
         if bits != self.bits:
@@ -239,6 +243,12 @@ class Engine:
         # 3. калибровка
         if self.capture is not None and self.capture.done(now):
             self._finish_calibration()
+        if self.wizard.update(now):
+            self._dirty = True
+            if self.wizard.step == "review":
+                bad = [i + 1 for i, r in enumerate(self.wizard.summary()) if r["grade"] in ("flat", "no_data")]
+                self._event("calibration", "Калибровка: замеры готовы — проверьте итог и нажмите «Сохранить»"
+                            + (f"; каналы без сигнала: {', '.join(f'S{i}' for i in bad)}" if bad else ""), source="system")
         # 4. жест-команда (dsp/recognizers/combo.py): роли пальцев, удержание, защита от сопутствующего сжатия
         self.commands.roles = roles
         armed = self.controller.armed and self.controller.link_ok
@@ -313,6 +323,29 @@ class Engine:
         self._event("calibration", f"Калибровка «{'ладонь' if target == 'open' else 'кулак'}» записана; "
                     f"откалибровано каналов: {valid} из {len(self.channels)}", source="system")
 
+    # ---------- мастер калибровки ----------
+    def wizard_start(self, target: str, duration: float | None = None) -> None:
+        if self.mode != "values" or not self.channels:
+            raise RuntimeError("Калибровка возможна только при потоке значений АЦП — подключите перчатку")
+        kw = {} if duration is None else {"duration": duration}
+        self.wizard.start(target, len(self.channels), time.monotonic(), **kw)
+        self._dirty = True
+
+    def wizard_save(self) -> dict:
+        opens, fists = self.wizard.levels()
+        self.storage.put("calibration", {"open": opens, "fist": fists})
+        self._load_calibration()
+        valid = sum(1 for c in self.channels if c.cal.valid)
+        self.last_calibration = {"target": "wizard", "values": fists, "valid_channels": valid}
+        self.wizard.reset()
+        self._event("calibration", f"Калибровка сохранена: откалибровано каналов {valid} из {len(self.channels)}",
+                    source="system")
+        return {"valid_channels": valid}
+
+    def wizard_cancel(self) -> None:
+        self.wizard.reset()
+        self._dirty = True
+
     def _load_calibration(self) -> None:
         cal = self.storage.get("calibration", {})
         for i, ch in enumerate(self.channels):
@@ -370,7 +403,7 @@ class Engine:
         if not self.imu_tracker.count:
             raise RuntimeError("Нет данных IMU — обнулять нечего")
         self.imu_tracker.set_zero()
-        self._event("imu", "Положение обнулено: текущая поза — исходная", source="manual")
+        self._event("imu", "Поворот обнулён: текущее направление руки — «вперёд» (наклоны — по силе тяжести)", source="manual")
 
     def imu_calibrate(self) -> None:
         if not self.imu_tracker.count:
@@ -487,6 +520,7 @@ class Engine:
                            "rot_target": round(c.rot_target, 1), "rot_command": round(c.rot_command, 1),
                            "rot_limit": c.config.rot_limit_deg},
             "calibrating": self.capture.target if self.capture else None,
+            "wizard": self.wizard.snapshot(now),
             "last_calibration": self.last_calibration,
             "recording": {"active": self.recorder.active, "file": self.recorder.path.name if self.recorder.path else None,
                           "rows": self.recorder.rows},
