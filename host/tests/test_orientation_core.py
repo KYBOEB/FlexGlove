@@ -128,7 +128,9 @@ def test_zero_makes_current_pose_origin():
         tr.update(raw_from(acc, (0, 0, 0)), i * DT)
     tr.set_zero()
     snap = tr.snapshot(0.2)
-    assert abs(snap["roll"]) < 0.5 and abs(snap["pitch"]) < 0.5 and abs(snap["yaw"]) < 0.5
+    # D-28: обнуляется только рысканье, наклоны остаются абсолютными (тангаж > 0 — пальцы вверх)
+    assert snap["roll"] == pytest.approx(25, abs=0.5) and snap["pitch"] == pytest.approx(15, abs=0.5)
+    assert abs(snap["yaw"]) < 0.5
     assert snap["q"][0] == pytest.approx(1.0, abs=1e-4) and snap["zeroed"]
 
 

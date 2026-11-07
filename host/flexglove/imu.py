@@ -10,8 +10,15 @@ a_рука = M · a_датчик (то же для угловой скорост
 - до первого замера — по первому участку покоя (детектор ImuRestDetector);
 - дальше в покое смещение медленно уточняется (≈ 4 с памяти) — так уходит температурный дрейф.
 
-Поза: фильтр (Madgwick по умолчанию) даёт q — поворот «рука → Земля». «Обнулить положение» запоминает q0,
-наружу отдаётся относительный поворот q_rel = q0* ⊗ q (поворот руки от исходной позы в её же осях).
+Поза: фильтр (Madgwick по умолчанию) даёт q — поворот «рука → Земля» (ось Z Земли — вверх).
+
+Для экрана (решение D-28) ориентация абсолютная по силе тяжести: наклоны (крен, тангаж) не обнуляются никогда —
+рука опущена → модель пальцами вниз, ладонь вверх → модель ладонью вверх. Обнуляется только рысканье
+(направление по горизонту, которое MPU6050 без магнитометра не знает): «Обнулить поворот» запоминает курс руки ψ0,
+наружу отдаётся q_world = Rz(−ψ0) ⊗ q — после обнуления пальцы смотрят «вперёд» (ось X Земли = в экран).
+Курс — направление пальцев на горизонт; если пальцы почти вертикальны, — по тыльной стороне кисти (см. heading_deg).
+
+Для поворота захвата (D-25, в интерфейсе скрыт — D-26) остаётся прежний относительный поворот q_rel = q0* ⊗ q.
 Крен для захвата — закрутка вокруг оси пальцев X (разложение «качание + закрутка»), устойчивая при любом наклоне
 кисти, пока предплечье не вертикально (вокруг вертикали поворот видит только гироскоп — он дрейфует).
 """
@@ -21,8 +28,8 @@ import math
 from dataclasses import dataclass
 
 from .dsp.filters import SampleClock
-from .dsp.orientation import (ComplementaryFilter, MadgwickFilter, Quat, Vec, imu_from_v03, q_conj, q_mul,
-                              q_normalize, q_to_euler)
+from .dsp.orientation import (ComplementaryFilter, MadgwickFilter, Quat, Vec, imu_from_v03, q_conj,
+                              q_from_axis_angle, q_mul, q_normalize, q_rotate, q_to_euler)
 from .dsp.segmentation import ImuRestDetector
 
 CAPTURE_S = 2.0               # замер смещения при подключении и по кнопке
@@ -53,6 +60,30 @@ def apply_mount(m, v: Vec) -> Vec:
     return (m[0][0] * v[0] + m[0][1] * v[1] + m[0][2] * v[2],
             m[1][0] * v[0] + m[1][1] * v[1] + m[1][2] * v[2],
             m[2][0] * v[0] + m[2][1] * v[1] + m[2][2] * v[2])
+
+
+HEADING_MIN_HORIZONTAL = 0.35   # пальцы ближе к вертикали (|горизонтальная часть| < 0,35, ≈ 70°) — курс по тыльной стороне
+
+
+def heading_deg(q: Quat) -> float:
+    """Курс руки (рысканье по горизонту), градусы −180…180: куда на горизонте смотрят пальцы.
+
+    При почти вертикальных пальцах их проекция на горизонт мала и шумит — тогда курс берётся по тыльной стороне
+    кисти: у руки «пальцами вверх» тыльная сторона смотрит назад (к оператору), «пальцами вниз» — вперёд.
+    Так курс непрерывен при наклоне вперёд-назад (тангаже) и одинаков для поз «вперёд» и «вверх/вниз»."""
+    fx, fy, fz = q_rotate(q, (1.0, 0.0, 0.0))
+    if math.hypot(fx, fy) >= HEADING_MIN_HORIZONTAL:
+        return math.degrees(math.atan2(fy, fx))
+    bx, by, _ = q_rotate(q, (0.0, 0.0, 1.0))
+    if fz > 0:
+        bx, by = -bx, -by
+    return math.degrees(math.atan2(by, bx))
+
+
+def tilt_deg(q: Quat) -> tuple[float, float]:
+    """Абсолютные наклоны по силе тяжести: (крен, тангаж) в градусах, тангаж > 0 — пальцы вверх."""
+    roll, pitch, _ = q_to_euler(q)
+    return roll, -pitch
 
 
 def twist_deg(q: Quat, axis: int = 0) -> float:
@@ -96,6 +127,7 @@ class ImuTracker:
         self.capture: Capture | None = None
         self.message = ""
         self.q0: Quat = (1.0, 0.0, 0.0, 0.0)
+        self.heading0 = 0.0                       # курс, принятый за «вперёд» (обнуление рысканья, D-28)
         self.zeroed = False
         self.zero_after_capture = False
         self.count = 0
@@ -109,8 +141,10 @@ class ImuTracker:
         self.message = "Калибровка гироскопа: держите руку неподвижно 2 с"
 
     def set_zero(self) -> None:
-        """Текущая поза становится исходной."""
+        """«Обнулить поворот»: текущий курс руки становится «вперёд» (экран). Наклоны не трогаются (D-28).
+        Для поворота захвата (D-25) текущая поза запоминается целиком как исходная."""
         self.q0 = self.filter.q
+        self.heading0 = heading_deg(self.filter.q)
         self.zeroed = True
 
     # ---------------- вход ----------------
@@ -165,14 +199,22 @@ class ImuTracker:
         return q_normalize(q_mul(q_conj(self.q0), self.filter.q))
 
     @property
+    def q_world(self) -> Quat:
+        """Ориентация руки для экрана: абсолютные наклоны, рысканье — от обнулённого курса (D-28)."""
+        return q_normalize(q_mul(q_from_axis_angle((0.0, 0.0, 1.0), math.radians(-self.heading0)), self.filter.q))
+
+    @property
     def wrist_roll_deg(self) -> float:
         """Крен кисти — закрутка вокруг оси пальцев относительно исходной позы."""
         return twist_deg(self.q_rel, 0)
 
     def snapshot(self, now: float) -> dict:
-        roll, pitch, yaw = q_to_euler(self.q_rel)
+        qw = self.q_world
+        roll, pitch = tilt_deg(qw)
+        yaw = (heading_deg(self.filter.q) - self.heading0 + 180) % 360 - 180
         return {
-            "q": [round(c, 5) for c in self.q_rel],
+            "q": [round(c, 5) for c in self.q_rel],          # относительно исходной позы (поворот захвата, D-25)
+            "q_world": [round(c, 5) for c in qw],            # для экрана: «рука → мир», ось Z мира — вверх (D-28)
             "roll": round(roll, 1), "pitch": round(pitch, 1), "yaw": round(yaw, 1),
             "wrist_roll": round(self.wrist_roll_deg, 1),
             "bias": [round(b, 3) for b in self.bias], "bias_ok": self.bias_ok, "bias_source": self.bias_source,
