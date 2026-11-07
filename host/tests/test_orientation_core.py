@@ -182,6 +182,8 @@ def test_rotation_deadband_hold_and_link_loss():
 # ---------------- имитация IMU ----------------
 def test_mock_imu_line_format_and_physics():
     m = MockSource(lambda *a, **k: None, lambda **k: None, n_channels=2)
+    m.angle_target = [0.0, 0.0, 0.0]                  # ладонь вниз, пальцы вперёд (исходная поза демо — пальцы вверх)
+    m.angles = [0.0, 0.0, 0.0]
     samples = [m.imu_sample(i * DT, DT) for i in range(200)]
     vals = [tuple(int(v) for v in s.split(";")) for s in samples]
     assert all(len(v) == 6 for v in vals)
