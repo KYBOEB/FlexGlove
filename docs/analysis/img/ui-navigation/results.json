@@ -1,0 +1,87 @@
+{
+  "results": [
+    {
+      "viewport": [
+        1366,
+        768
+      ],
+      "palm_anchor": {
+        "error": 1.2710574864626038e-13,
+        "damping": false,
+        "autoRotate": false
+      },
+      "audio_result_gap_px": 16,
+      "single_stop_request": true,
+      "tab_switch_no_events_or_audio": true,
+      "processing_confirm_cancel": true,
+      "custom_processing_apply_cancel_and_invalid_json": true,
+      "csv_record_replay": true,
+      "unique_ids_and_labels": {
+        "duplicateIds": [],
+        "unlabeled": []
+      },
+      "fixture_states": [
+        "calibration-blocked",
+        "stale",
+        "websocket-stalled",
+        "websocket-disconnected"
+      ],
+      "live_states": [
+        "no-source",
+        "demo",
+        "no-gestures",
+        "training",
+        "candidate",
+        "triggered",
+        "unknown",
+        "missing-mp3",
+        "audio-error-with-stub-device",
+        "disconnected",
+        "incompatible"
+      ]
+    },
+    {
+      "viewport": [
+        1920,
+        1080
+      ],
+      "palm_anchor": {
+        "error": 2.3437142008433856e-13,
+        "damping": false,
+        "autoRotate": false
+      },
+      "audio_result_gap_px": 16,
+      "single_stop_request": true,
+      "tab_switch_no_events_or_audio": true,
+      "processing_confirm_cancel": true,
+      "custom_processing_apply_cancel_and_invalid_json": true,
+      "csv_record_replay": true,
+      "unique_ids_and_labels": {
+        "duplicateIds": [],
+        "unlabeled": []
+      },
+      "fixture_states": [
+        "calibration-blocked",
+        "stale",
+        "websocket-stalled",
+        "websocket-disconnected"
+      ],
+      "live_states": [
+        "no-source",
+        "demo",
+        "no-gestures",
+        "training",
+        "candidate",
+        "triggered",
+        "unknown",
+        "missing-mp3",
+        "audio-error-with-stub-device",
+        "disconnected",
+        "incompatible"
+      ]
+    }
+  ],
+  "restart_preserves_template": true,
+  "user_data_files_unchanged": 199,
+  "page_errors": []
+}

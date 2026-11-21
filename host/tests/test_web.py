@@ -49,3 +49,42 @@ def test_direct_id_references_exist():
     html = (WEB / "index.html").read_text(encoding="utf-8")
     ids = set(re.findall(r'\$\("#([\w-]+)"\)', js))
     assert not [i for i in ids if f'id="{i}"' not in html]
+
+
+def test_navigation_preserves_controls_once_on_their_screens():
+    """Перенос сохраняет каждый рабочий узел ровно один раз и в нужном контексте."""
+    from html.parser import HTMLParser
+
+    class Screens(HTMLParser):
+        def __init__(self):
+            super().__init__()
+            self.screen = None
+            self.ids = {}
+            self.tabs = []
+
+        def handle_starttag(self, tag, attrs):
+            attrs = dict(attrs)
+            if tag == "section":
+                self.screen = attrs.get("id")
+            if "id" in attrs:
+                assert attrs["id"] not in self.ids, attrs["id"]
+                self.ids[attrs["id"]] = self.screen
+            if "data-tab" in attrs:
+                self.tabs.append(attrs["data-tab"])
+
+        def handle_endtag(self, tag):
+            if tag == "section":
+                self.screen = None
+
+    screens = Screens()
+    screens.feed((WEB / "index.html").read_text(encoding="utf-8"))
+    assert screens.tabs == ["hand", "gestures", "signals", "settings"]
+    for screen, controls in {
+        "hand": ["hand3d", "gestureWords", "gestureProgress", "demoStrip", "sideErrors", "imuZero", "viewReset"],
+        "gestures": ["createGesture", "gestureList", "cancelTraining", "audioResult", "audioStatus", "stopAudio"],
+        "signals": ["chart", "chBody", "recBtn", "replayFile", "pipePreset", "pipeJson", "eventLog", "imuBox", "fingerRows"],
+        "settings": ["srcKind", "fingerMap", "handSide", "imuMount", "calWizardBtn", "calReset", "imuCal"],
+    }.items():
+        for control in controls:
+            assert screens.ids[control] == "tab-" + screen, control
+    assert not {"mainTarget", "gestureMini", "stopAudioMain", "createGestureSettings", "stagePose"} & screens.ids.keys()
