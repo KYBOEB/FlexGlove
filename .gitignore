@@ -24,3 +24,7 @@ dist/
 
 # резервные копии истории git (git bundle)
 *.bundle
+
+# Личные аудиофразы
+audio/*
+!audio/README.md

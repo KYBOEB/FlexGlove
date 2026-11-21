@@ -15,8 +15,8 @@ WEB = Path(__file__).resolve().parents[1] / "flexglove" / "web"
 ROOT = Path(__file__).resolve().parents[2]
 
 
-def test_version_is_062():
-    assert __version__ == "0.6.2"
+def test_version_includes_stage4c():
+    assert tuple(map(int, __version__.split("."))) >= (0, 6, 2)
     assert "## 0.6.2" in (ROOT / "CHANGELOG.md").read_text(encoding="utf-8")
 
 

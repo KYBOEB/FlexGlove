@@ -26,8 +26,10 @@ def test_demo_flow(tmp_path):
         assert st["n_channels"] == 5
         time.sleep(0.8)                                   # автокалибровка: покой
         c.post("/api/mock", json={"bits": "01100"})
-        st = wait(c, lambda s: s["actions"]["light"])
-        assert st["combo"] == "01100" and st["actions"]["light"]
+        st = wait(c, lambda s: s["combo"] == "01100")
+        assert st["combo"] == "01100" and not st["actions"]["light"]
+        assert not st["gesture_system"]["legacy_commands_enabled"]
+        assert st["bindings"] == {"01100": "light"}
         # управление захватом: разрешить и сжать кисть
         c.post("/api/mock", json={"bits": "00000"})
         wait(c, lambda s: s["combo"] == "00000")

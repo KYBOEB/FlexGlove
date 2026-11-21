@@ -1,7 +1,8 @@
 /* FlexGlove — интерфейс. Состояние приходит по WebSocket (/ws) ~30 раз в секунду, команды уходят через REST (/api).
    Этап 4б: главный экран «Рука» — большая 3D-рука (hand3d.js) и узкая панель справа: пальцы процентами и словами,
    жест словами, связь, IMU и калибровка. «Рабочая зона» и карточка контроллера убраны из интерфейса (D-26), ядро
-   по-прежнему ведёт контроллер и команды. Двоичная строка комбинации осталась только в «Отладке потока». */
+   распознаёт обученные позы и воспроизводит фразы на Python. Старый автомат команд отключён (D-35).
+   Двоичная строка комбинации осталась только в «Отладке потока». */
 (function () {
   const $ = (s) => document.querySelector(s);
   const $$ = (s) => Array.from(document.querySelectorAll(s));
@@ -10,7 +11,7 @@
   let META = { actions: [], fingers: [], version: "" };
   let S = null;
   let lastEventTs = 0;
-  let bindKey = "", mapKey = "", tableKey = "", rowsKey = "";
+  let gestureKey = "", mapKey = "", tableKey = "", rowsKey = "";
 
   const handSettings = new HandView($("#handSettings"));
   const handMain = new HandView($("#handMain"), { onFinger: (f) => demoToggleFinger(f) });   // 2D, если нет WebGL
@@ -49,8 +50,6 @@
   const fname = (f) => window.FINGER_NAMES[f] || f;
   const pct = (x) => `${Math.round((x || 0) * 100)} %`;
   const bendWord = (b) => (b < 0.25 ? "разогнут" : b < 0.65 ? "полусогнут" : "согнут");
-  const combosFor = (n) => Array.from({ length: 2 ** n }, (_, i) => i.toString(2).padStart(n, "0").split("").reverse().join(""))
-    .sort((a, b) => (a.split("1").length - b.split("1").length) || (a < b ? 1 : -1));
   function bendsByFinger(values, map) {
     const out = {};
     values.forEach((v, i) => { if (map[i]) out[map[i]] = v; });
@@ -159,11 +158,9 @@
       : `a: ${imu.ax}; ${imu.ay}; ${imu.az} мг · g: ${(imu.gx / 10).toFixed(1)}; ${(imu.gy / 10).toFixed(1)}; ${(imu.gz / 10).toFixed(1)} °/с` +
         (imu.stale ? " · устарело" : "");
     renderFingerMap(Math.max(n, 5), map, S.roles || []);
-    renderBindings(n, map);
+    renderGestures();
     const hs = $("#handSide"); if (document.activeElement !== hs) hs.value = S.hand || "right";
     const mt = $("#imuMount"); if (document.activeElement !== mt && ori) mt.value = ori.mount;
-    const deb = $("#debounce");
-    if (document.activeElement !== deb) deb.value = S.debounce_ms;
   }
 
   /** Статус калибровки для главного экрана и «Сигналов». */
@@ -190,11 +187,17 @@
     const cs = calibrationStatus(chans);
     const sc = $("#sideCal"); sc.textContent = cs.text; sc.className = "small cal-status " + cs.cls;
 
-    // жест словами + мини-силуэт
-    $("#gestureWords").textContent = S.n_channels ? comboWords(S.combo, map) : "—";
-    gestureMini.set(S.combo ? bendsByFinger([...S.combo].map(Number), map) : {});
-    const bound = S.committed && S.bindings[S.committed];
-    $("#mainTarget").textContent = bound ? `→ ${act(bound).title}` : "";
+    const gs = S.gesture_system || {}, ts = gs.templates || [];
+    const candidate = ts.find(t => t.id === gs.candidate);
+    const fired = ts.find(t => t.id === gs.triggered?.gesture_id);
+    $("#gestureWords").textContent = candidate?.name || "Неизвестный жест";
+    gestureMini.set(bendsByFinger(chans.map(c => c.bend), map));
+    $("#mainTarget").textContent = fired ? `Сработал: ${fired.name} · № ${gs.triggered.sequence}` : "Ещё не срабатывал";
+    $("#gestureProgress").value = gs.hold_progress || 0;
+    $("#gestureReason").textContent = gs.reason || "";
+    const audio = S.audio || {};
+    $("#audioStatus").textContent = audio.active ? `Играет: ${audio.active.file}`
+      : `Аудио: ${audio.queue?.length || 0} в очереди`;
 
     // пальцы: название, полоса, слово; мелко — сырое и «Δ от ладони»
     const key = chans.length + "|" + map.join();
@@ -298,38 +301,84 @@
     if (key === mapKey) return;
     mapKey = key;
     const opts = (sel) => META.fingers.map((f) => `<option value="${f}" ${f === sel ? "selected" : ""}>${fname(f)}</option>`).join("");
-    const role = (i) => roles[i] || { grip: true, cmd: true };
     $("#fingerMap").innerHTML = Array.from({ length: shown }, (_, i) =>
       `<div class="fm-row"><span><span class="swatch" style="background:${CHANNEL_COLORS[i]}"></span>Канал S${i + 1}</span>
-        <select data-ch="${i}">${opts(map[i])}</select>
-        <label class="check"><input type="checkbox" data-role="grip" data-ch="${i}" ${role(i).grip ? "checked" : ""}> сжатие</label>
-        <label class="check"><input type="checkbox" data-role="cmd" data-ch="${i}" ${role(i).cmd ? "checked" : ""}> команды</label></div>`).join("");
-    const r = roles.slice(0, shown);
-    const warn = !r.length ? "" : !r.some((x) => x.grip) ? "Нет ни одного пальца сжатия — захват не будет следовать за рукой."
-      : !r.some((x) => x.cmd && !x.grip) ? "Нет пальцев «только команды» — пока управление активно, жесты не работают." : "";
-    $("#rolesWarn").textContent = warn; $("#rolesWarn").hidden = !warn;
+        <select data-ch="${i}">${opts(map[i])}</select></div>`).join("");
   }
 
-  function renderBindings(n, map) {
-    const key = JSON.stringify([n, map, S.bindings, META.actions.length]);
-    if (key !== bindKey) {
-      bindKey = key;
-      const opts = (sel) => `<option value="">— нет команды —</option>` +
-        META.actions.map((a) => `<option value="${a.id}" ${a.id === sel ? "selected" : ""}>${a.title}</option>`).join("");
-      const grid = $("#bindGrid");
-      grid.innerHTML = n ? combosFor(n).map((c) => {
-        const rest = !c.includes("1");
-        return `<div class="bind-card ${S.bindings[c] ? "bound" : ""}" data-combo="${c}"><svg></svg>
-          <div class="bc-words">${comboWords(c, map)}</div>
-          ${rest ? `<div class="bc-rest">покой — без команды</div>` : `<select data-combo="${c}">${opts(S.bindings[c])}</select>`}</div>`;
-      }).join("") : `<p class="muted">Подключите перчатку или демо — появятся все сочетания для числа каналов.</p>`;
-      $$("#bindGrid .bind-card").forEach((card) => {
-        const hv = new HandView(card.querySelector("svg"), { static: true });
-        hv.set(bendsByFinger([...card.dataset.combo].map(Number), map));
-      });
-    }
-    $$("#bindGrid .bind-card").forEach((c) => c.classList.toggle("live", c.dataset.combo === S.committed));
+  // Имена и названия файлов приходят из пользовательских данных; всегда экранируем HTML.
+  const esc = value => String(value ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;", "'":"&#39;"}[c]));
+  let audioFiles = [], audioFolder = "", audioRefreshing = false;
+  async function refreshAudioFiles() {
+    if (audioRefreshing) return;
+    audioRefreshing = true;
+    try {
+      const result = await api("/api/audio/files");
+      audioFiles = result.files; audioFolder = result.folder;
+      if (S) renderGestures();
+    } catch (e) { toast(e.message, true); }
+    finally { audioRefreshing = false; }
   }
+  setInterval(refreshAudioFiles, 3000);
+
+  function renderGestures() {
+    const gs = S.gesture_system || {}, templates = gs.templates || [];
+    $("#gestureProfile").textContent = `Профиль: ${{demo:"демо", glove:"перчатка", replay:"запись"}[gs.profile] || "нет данных"}. Удержание: 700 мс; выход: 350 мс.`;
+    $("#audioFolder").textContent = `Папка MP3: ${audioFolder || "audio рядом с FlexGlove.pyw"}`;
+    const tr = gs.training, result = gs.training_result;
+    $("#trainingStatus").textContent = tr ? `Обучение «${tr.name}»: ${Math.round(tr.progress * 100)} % — не двигайтесь`
+      : result ? `${result.message}${result.similar?.length ? " · Внимание: похожие эталоны: " + result.similar.join(", ") + ". Выберите более разные позы." : ""}` : "";
+    $("#cancelTraining").hidden = !tr;
+    $("#createGesture").disabled = !!tr;
+    $("#createGestureSettings").disabled = !!tr;
+    const key = JSON.stringify([templates, audioFiles]);
+    if (key !== gestureKey && !$("#gestureList select:focus")) {
+      gestureKey = key;
+      $("#gestureList").innerHTML = templates.length ? templates.map(t => {
+        const files = [...new Set([...audioFiles, ...(t.audio ? [t.audio] : [])])];
+        return `<div class="learned-gesture" data-id="${esc(t.id)}">
+          <strong>${esc(t.name)}</strong><span class="small">${esc(t.context.profile)} · ${t.context.channels.length} кан. · ${t.compatible ? "совместим" : "нужно переобучить / другой профиль"}</span>
+          <label>Аудиофраза <select data-audio="${esc(t.id)}"><option value="">Аудио не назначено</option>${files.map(f => `<option value="${esc(f)}" ${f === t.audio ? "selected" : ""}>${esc(f)}${audioFiles.includes(f) ? "" : " — недоступно"}</option>`).join("")}</select></label>
+          <span class="small">${t.audio_available ? "MP3 доступен" : "Аудио не назначено/недоступно"}</span>
+          <div class="row"><button class="ghost small" data-gesture-action="rename">Переименовать</button>
+          <button class="ghost small" data-gesture-action="retrain" ${t.context.profile !== gs.profile ? 'disabled title="Для другого профиля создайте новый жест"' : ""}>Обучить заново</button>
+          <button class="ghost small" data-gesture-action="test">Проверить аудио</button>
+          <button class="ghost small" data-gesture-action="delete">Удалить</button></div></div>`;
+      }).join("") : `<p class="muted">Жестов пока нет. Покажите позу и нажмите «Создать жест».</p>`;
+    }
+    const r = S.audio?.results?.[0];
+    const status = {queued:"поставлено в очередь", playing:"воспроизводится", finished:"воспроизведение завершено", unavailable:"аудио не назначено/недоступно", error:"ошибка проигрывателя", cancelled:"отменено", duplicate:"уже в очереди или играет", full:"очередь заполнена", stopped:"остановлено"};
+    $("#audioResult").textContent = r ? `Задание № ${r.job_id}: ${status[r.status] || r.status}${r.message ? " · " + r.message : ""}` : "Воспроизведений пока не было";
+  }
+  async function createGesture() {
+    const name = prompt("Название жеста. Покажите позу и держите её неподвижно около секунды:");
+    if (!name?.trim()) return;
+    try { await api("/api/gestures/train", {method:"POST", body:{name}}); }
+    catch(e) { toast(e.message, true); }
+  }
+  $("#createGesture").addEventListener("click", createGesture);
+  $("#createGestureSettings").addEventListener("click", createGesture);
+  $("#cancelTraining").addEventListener("click", () => api("/api/gestures/cancel", {method:"POST"}).catch(e => toast(e.message, true)));
+  for (const id of ["#stopAudio", "#stopAudioMain"]) $(id).addEventListener("click", () => api("/api/audio/stop", {method:"POST"}).catch(e => toast(e.message, true)));
+  $("#gestureList").addEventListener("click", async e => {
+    const button = e.target.closest("button[data-gesture-action]");
+    if (!button) return;
+    const id = button.closest("[data-id]").dataset.id;
+    const t = S.gesture_system.templates.find(t => t.id === id);
+    try {
+      if (button.dataset.gestureAction === "rename") {
+        const name = prompt("Новое название", t.name);
+        if (name?.trim()) await api(`/api/gestures/${id}`, {method:"PATCH", body:{name}});
+      } else if (button.dataset.gestureAction === "retrain") {
+        await api("/api/gestures/train", {method:"POST", body:{name:t.name, template_id:id}});
+      } else if (button.dataset.gestureAction === "delete") {
+        if (confirm(`Удалить жест «${t.name}»?`)) await api(`/api/gestures/${id}`, {method:"DELETE"});
+      } else {
+        const r = await api(`/api/audio/test/${id}`, {method:"POST"});
+        toast(r.status === "queued" ? "Аудио поставлено в очередь" : r.message, r.status !== "queued");
+      }
+    } catch(e) { toast(e.message, true); }
+  });
 
   // ---------------- мастер калибровки ----------------
   // шаги: 1 «ладонь» (отсчёт 3-2-1 → замер 3 с) → 2 «кулак» (так же) → 3 итог по каналам → «Сохранить» / «Повторить»
@@ -446,13 +495,9 @@
   document.addEventListener("change", async (e) => {
     const t = e.target;
     try {
-      if (t.matches("select[data-combo]")) {
-        await api("/api/bindings", { method: "POST", body: { combo: t.dataset.combo, action_id: t.value || null } });
-        toast(t.value ? `«${comboWords(t.dataset.combo, S.finger_map)}» → ${act(t.value).title}` : "Привязка снята");
-      } else if (t.matches("input[data-role]")) {
-        const roles = (S.roles || []).map((r) => ({ ...r }));
-        roles[+t.dataset.ch][t.dataset.role] = t.checked;
-        await api("/api/settings", { method: "POST", body: { channel_roles: roles } });
+      if (t.matches("select[data-audio]")) {
+        await api(`/api/gestures/${t.dataset.audio}`, {method:"PATCH", body:{audio:t.value || null}});
+        t.blur();
       } else if (t.matches("select[data-ch]")) {
         const map = [...S.finger_map];
         map[+t.dataset.ch] = t.value;
@@ -462,8 +507,6 @@
       } else if (t.id === "imuMount") {
         await api("/api/settings", { method: "POST", body: { imu_mount: t.value } });
         toast("Крепление модуля изменено — ориентация начата заново (калибровка 2 с)");
-      } else if (t.id === "debounce") {
-        await api("/api/settings", { method: "POST", body: { debounce_ms: +t.value } });
       } else if (t.id === "mockAuto") {
         await api("/api/mock", { method: "POST", body: { auto: t.checked } });
       } else if (t.id === "mockTour") {
@@ -550,7 +593,6 @@
     catch (err) { toast(err.message, true); }
   });
   $("#disconnectBtn").addEventListener("click", () => api("/api/disconnect", { method: "POST" }).catch((e) => toast(e.message, true)));
-  $("#clearBindings").addEventListener("click", () => api("/api/bindings", { method: "DELETE" }).then(() => toast("Привязки удалены")).catch((e) => toast(e.message, true)));
 
   // калибровка (сброс), запись, воспроизведение
   $("#calReset").addEventListener("click", () => api("/api/calibration", { method: "DELETE" }).then(() => toast("Калибровка сброшена")).catch((e) => toast(e.message, true)));
@@ -696,6 +738,7 @@
     $("#imuMount").innerHTML = (META.imu_mounts || []).map((m) => `<option value="${m.id}">${m.title}</option>`).join("");
     init3d();
     await loadPipelines();
+    await refreshAudioFiles();
     connectWS();
   })();
 })();

@@ -1,8 +1,8 @@
 """Ядро приложения.
 
 Принимает сообщения от источника → разбирает (parser) → обрабатывает каждый канал (processing)
-→ получает степень сгиба пальцев и комбинацию 0/1 → вызывает привязанные действия (жесты)
-и управляет захватом через безопасный контроллер (control) → рассылает состояние в интерфейс.
+→ получает непрерывные сгибы → обучает/распознаёт статические позы → ставит локальное аудио в очередь.
+Рассылает состояние всем вкладкам. Архивный контроллер сохранён, автомат команд отключён (D-35).
 
 Два режима входных данных определяются автоматически:
 - values — значения АЦП (основной): фильтрация, калибровка, сгиб 0..1, состояние 0/1 с гистерезисом;
@@ -17,8 +17,10 @@ from pathlib import Path
 from typing import Any
 
 from .actions import ACTIONS
+from .audio import AudioPlayer
+from .gestures import GestureSystem
 from .calib_wizard import CalibrationWizard
-from .dsp.recognizers import CommandRecognizer, Role, Sample, armed_bindings, normalize_roles
+from .dsp.recognizers import CommandRecognizer, Role, armed_bindings, normalize_roles
 from .control import LINK_TIMEOUT_S, GripController
 from .parser import IMU_FIELDS, Frame, describe_raw, parse_message
 from .dsp import presets
@@ -40,8 +42,13 @@ WARN_GRACE_S = 2.5          # первые секунды после подкл�
 
 
 class Engine:
-    def __init__(self, storage: Storage, data_dir: Path | None = None):
+    def __init__(self, storage: Storage, data_dir: Path | None = None, *, clock=None, audio=None):
         self.storage = storage
+        self.clock = clock or (lambda: time.monotonic())
+        self.gestures = GestureSystem(storage)
+        self.audio = audio or AudioPlayer(Path(__file__).resolve().parents[2] / "audio")
+        self._gesture_context = None
+        self._gesture_input_ok = False
         self.finger_map: list[str] = storage.get("finger_map", DEFAULT_FINGER_MAP)
         if len(self.finger_map) < 5:  # настройки этапа 0 хранили 2 пальца
             self.finger_map = (self.finger_map + [f for f in DEFAULT_FINGER_MAP if f not in self.finger_map])[:5]
@@ -52,6 +59,7 @@ class Engine:
         self.prefer_values = False
         self.channels: list[ChannelProcessor] = []
         self.tag_order: list[int] = []     # метки каналов в порядке номеров
+        self._channel_layout: str | None = None
         self.bits: tuple[int, ...] = ()
         self.combo_since = 0.0
         self.commands = CommandRecognizer()        # D-21: роли пальцев, удержание, защита от сжатия
@@ -94,10 +102,12 @@ class Engine:
 
     # ================= жизненный цикл =================
     def start(self) -> None:
+        self.audio.start()
         self._tasks = [asyncio.create_task(self._tick_loop()), asyncio.create_task(self._broadcast_loop())]
 
     async def stop(self) -> None:
         self.recorder.stop()
+        await asyncio.to_thread(self.audio.close)
         for t in self._tasks:
             t.cancel()
         await asyncio.gather(*self._tasks, return_exceptions=True)
@@ -106,7 +116,7 @@ class Engine:
     def on_raw(self, data: bytes | bytearray | str, tag: int | None = None) -> None:
         """Вызывается источником на каждое сообщение. tag — номер канала, если источник
         знает его сам (например, у каждого сенсора своя BLE-характеристика)."""
-        now = time.monotonic()
+        now = self.clock()
         self.msg_total += 1
         self._msg_times.append(now)
         self.last_raw = describe_raw(data)
@@ -132,7 +142,15 @@ class Engine:
             if frame.kind == "tagged":
                 self.prefer_values = True
             self._set_mode("values")
+            if self._channel_layout is not None and self._channel_layout != frame.kind:
+                # Метки и позиционные номера — разные соответствия, даже при одинаковом числе каналов.
+                self.channels = []
+                self.tag_order = []
+                self.bits = ()
+            self._channel_layout = frame.kind
             if frame.kind == "values":
+                if len(self.channels) > frame.n:
+                    self.channels = self.channels[:frame.n]
                 self._ensure_channels(frame.n)
                 for i, v in enumerate(frame.values or ()):
                     self._update_channel(i, v, now)
@@ -176,6 +194,7 @@ class Engine:
             self.mode = mode
             self.channels = []
             self.tag_order = []
+            self._channel_layout = None
             self.bits = ()
             self.commands.reset()
             self.segmenter.reset()
@@ -204,8 +223,12 @@ class Engine:
         previous_kind = self.source_info.get("kind")
         self.source_info.update(info)
         if self.source_info.get("connected") and not was:
-            self.connected_since = time.monotonic()
+            self.connected_since = self.clock()
         if not self.source_info.get("connected") or previous_kind != self.source_info.get("kind") or not was:
+            self.audio.stop()
+            self.gestures.suspend("Источник отключён или переподключён: сначала выйдите из текущей позы")
+            self._gesture_context = None
+            self._gesture_input_ok = False
             self._set_mode("none")
             self.capture = None
             self.wizard.reset()
@@ -230,7 +253,7 @@ class Engine:
     async def _tick_loop(self) -> None:
         while True:
             await asyncio.sleep(TICK_S)
-            self.tick(time.monotonic())
+            self.tick(self.clock())
 
     def tick(self, now: float) -> None:
         # 1. связь
@@ -262,19 +285,75 @@ class Engine:
                 bad = [i + 1 for i, r in enumerate(self.wizard.summary()) if r["grade"] in ("flat", "no_data")]
                 self._event("calibration", "Калибровка: замеры готовы — проверьте итог и нажмите «Сохранить»"
                             + (f"; каналы без сигнала: {', '.join(f'S{i}' for i in bad)}" if bad else ""), source="system")
-        # 4. жест-команда (dsp/recognizers/combo.py): роли пальцев, удержание, защита от сопутствующего сжатия
-        self.commands.roles = roles
-        armed = self.controller.armed and self.controller.link_ok
-        sample = Sample(t=now, bits=self.bits, grip=self.grip,
-                        context={"armed": armed, "bindings": self.storage.bindings(), "debounce_s": self.debounce_ms / 1000})
-        for ev in self.commands.update(sample):
-            self._dirty = True
-            combo = ev.data["combo"]
-            if ev.kind == "command_ignored":
-                self._event("ignored", f"Жест {combo} не выполнен: пальцы команд двигались вместе со сжатием",
-                            source="system", combo=combo)
-            elif ev.data["action"] in ACTIONS:
-                self.toggle_action(ev.data["action"], source="gesture", combo=combo)
+        # D-35: прежние ARM/hold/light не распознаются параллельно с аудиожестами.
+        self._tick_gestures(now)
+
+    def gesture_input(self, now: float) -> tuple[list[float] | None, dict | None, float | None, str]:
+        kind = self.source_info.get("kind")
+        profile = "demo" if kind == "mock" else "replay" if kind == "replay" else "glove"
+        context = {"profile": profile, "channels": [
+            {"id": f"tag:{self.tag_order[i]}" if i < len(self.tag_order) else f"slot:{i}",
+             "finger": self.finger_map[i] if i < len(self.finger_map) else None,
+             "calibration": {"open": ch.cal.open, "fist": ch.cal.fist}}
+            for i, ch in enumerate(self.channels)], "hand": self.hand,
+            "pipeline": self.pipeline_config, "normalization": "fixed-linear-v1"}
+        if not self.source_info.get("connected") or self.mode != "values" or not self.channels:
+            return None, context, None, "Нужен подключённый источник непрерывных значений АЦП"
+        if self.capture or self.wizard.capture or self.wizard.step != "idle" or self.imu_tracker.capture is not None:
+            return None, context, None, "Во время калибровки распознавание и обучение запрещены"
+        if not all(ch.cal.valid for ch in self.channels):
+            return None, context, None, "Нужна сохранённая калибровка всех каналов; автокалибровка меняет шкалу"
+        if any(now - ch.last_update > self.gestures.thresholds.fresh_s or not ch.count for ch in self.channels):
+            return None, context, None, "Недостаточно свежих данных всех каналов"
+        return [ch.bend for ch in self.channels], context, min(ch.last_update for ch in self.channels), ""
+
+    def _tick_gestures(self, now: float) -> None:
+        values, context, sample_time, reason = self.gesture_input(now)
+        if context != self._gesture_context or (values is None and self._gesture_input_ok):
+            self.audio.stop()
+        self._gesture_context = context
+        self._gesture_input_ok = values is not None
+        ev = self.gestures.update(values, context, now, sample_time, reason)
+        if ev:
+            gesture = next(t for t in self.gestures.templates if t["id"] == ev["gesture_id"])
+            self._event("gesture_recognized", f"Распознан жест «{gesture['name']}» (событие {ev['sequence']})", "gesture")
+            result = self.audio.enqueue(gesture["id"], gesture.get("audio"))
+            self._event("audio_queue", f"Аудио: {result['status']} {result['message']}", "system")
+        self._dirty = True
+
+    def train_gesture(self, name: str, template_id: str | None = None) -> None:
+        now = self.clock()
+        values, context, _, reason = self.gesture_input(now)
+        if values is None:
+            raise ValueError(reason)
+        self.audio.stop()
+        self.gestures.context = context
+        self.gestures.begin(name, now, context, template_id)
+
+    def edit_gesture(self, gesture_id: str, *, name: str | None = None, audio: str | None = None,
+                     assign_audio: bool = False, delete: bool = False) -> dict:
+        if self.gestures.training:
+            raise ValueError("Дождитесь окончания обучения")
+        gesture = next((t for t in self.gestures.templates if t["id"] == gesture_id), None)
+        if gesture is None:
+            raise ValueError("Жест не найден")
+        updated = dict(gesture)
+        if name is not None:
+            name = name.strip()
+            if not name or len(name) > 80:
+                raise ValueError("Название должно содержать от 1 до 80 символов")
+            updated["name"] = name
+        if assign_audio:
+            if audio is not None:
+                self.audio.resolve(audio)
+            updated["audio"] = audio
+        if delete:
+            self.storage.delete_gesture(gesture_id)
+        else:
+            self.storage.save_gesture(updated)
+        self.audio.stop()
+        self.gestures.reload()
+        return updated
 
     def _bend(self, i: int, now: float) -> float | None:
         if self.mode == "bits":
@@ -323,7 +402,7 @@ class Engine:
             raise ValueError("target должен быть open или fist")
         if self.mode != "values" or not self.channels:
             raise RuntimeError("Калибровка возможна только при потоке значений АЦП")
-        self.capture = CalibrationCapture(target, len(self.channels), time.monotonic(), duration)
+        self.capture = CalibrationCapture(target, len(self.channels), self.clock(), duration)
         self._dirty = True
 
     def _finish_calibration(self) -> None:
@@ -348,7 +427,7 @@ class Engine:
         if self.mode != "values" or not self.channels:
             raise RuntimeError("Калибровка возможна только при потоке значений АЦП — подключите перчатку")
         kw = {} if duration is None else {"duration": duration}
-        self.wizard.start(target, len(self.channels), time.monotonic(), **kw)
+        self.wizard.start(target, len(self.channels), self.clock(), **kw)
         self._dirty = True
 
     def wizard_save(self) -> dict:
@@ -386,7 +465,7 @@ class Engine:
 
     # ================= запись =================
     def start_recording(self) -> str:
-        path = self.recorder.start(len(self.channels) or 5, imu=self._imu_live(time.monotonic()))
+        path = self.recorder.start(len(self.channels) or 5, imu=self._imu_live(self.clock()))
         self._event("record", f"Запись начата: {path.name}", source="manual")
         return path.name
 
@@ -432,7 +511,7 @@ class Engine:
     def imu_calibrate(self) -> None:
         if not self.imu_tracker.count:
             raise RuntimeError("Нет данных IMU — калибровать нечего")
-        self.imu_tracker.start_capture(time.monotonic())
+        self.imu_tracker.start_capture(self.clock())
         self._dirty = True
 
     def pipeline_title(self) -> str:
@@ -466,12 +545,12 @@ class Engine:
 
     # ================= состояние для интерфейса =================
     def rate(self, now: float | None = None) -> float:
-        now = time.monotonic() if now is None else now
+        now = self.clock() if now is None else now
         return round(sum(1 for t in self._msg_times if now - t <= 2.0) / 2.0, 1)
 
     def warnings(self, now: float | None = None) -> list[str]:
         """Предупреждения о качестве потока для «Пульта» и «Отладки потока»."""
-        now = time.monotonic() if now is None else now
+        now = self.clock() if now is None else now
         if not self.source_info.get("connected") or self.source_info.get("kind") == "replay":
             return []
         if now - self.connected_since < WARN_GRACE_S:
@@ -497,7 +576,7 @@ class Engine:
         return self.imu is not None and now - self.imu_time <= 1.0
 
     def snapshot(self) -> dict[str, Any]:
-        now = time.monotonic()
+        now = self.clock()
         n = len(self.channels)
         channels = []
         for i in range(n):
@@ -515,6 +594,12 @@ class Engine:
         bindings = {c: a for c, a in self.storage.bindings().items() if a in ACTIONS}
         c = self.controller
         return {
+            "gesture_system": {**self.gestures.snapshot(now),
+                "profile": (self.gestures.context or {}).get("profile"),
+                "templates": [{**t, "compatible": self.gestures.compatible(t),
+                    "audio_available": self.audio.available(t.get("audio"))} for t in self.gestures.templates],
+                "legacy_commands_enabled": False},
+            "audio": self.audio.snapshot(),
             "source": self.source_info,
             "mode": self.mode,
             "n_channels": n,
@@ -572,7 +657,7 @@ class Engine:
             await asyncio.sleep(1 / BROADCAST_HZ)
             if not self._subscribers:
                 continue
-            now = time.monotonic()
+            now = self.clock()
             # Даже без перчатки подтверждаем, что WebSocket и приложение живы.
             if not self._dirty and self.mode == "none" and now - last_broadcast < 1.0:
                 continue

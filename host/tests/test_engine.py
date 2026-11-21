@@ -9,16 +9,16 @@ def make(tmp_path=None):
     return Engine(Storage(":memory:"), Path(tmp_path) if tmp_path else None)
 
 
-def test_bits_debounce_and_toggle():
+def test_legacy_bits_and_bindings_do_not_execute_commands():
     e = make()
     e.set_binding("01", "light")
     e._on_frame(Frame(kind="bits", bits=(0, 1)), now=10.0)
     e.tick(10.05)
     assert e.committed is None and not e.light
     e.tick(10.3)
-    assert e.committed == "01" and e.light
+    assert e.committed is None and not e.light
     e.tick(10.6)
-    assert e.light
+    assert not e.light and e.storage.bindings() == {"01": "light"}
 
 
 def test_five_value_streams_to_combo():

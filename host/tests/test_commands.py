@@ -1,4 +1,4 @@
-"""D-21: команды-жесты не срабатывают от управления захватом.
+"""Архивные проверки D-21: алгоритм сохранён, в Engine больше не выполняется.
 
 Сценарии моделируют 2 сенсора при 50 Гц через полный конвейер ядра (фильтр → калибровка → сгиб → биты →
 роли → распознавание команд → контроллер). Роли по умолчанию: S1 — сжатие + команды, S2 — только команды.
@@ -9,6 +9,7 @@ from pathlib import Path
 import pytest
 
 from flexglove.commands import CommandRecognizer, Role, armed_bindings, default_roles, normalize_roles
+from flexglove.dsp.recognizers import Sample
 from flexglove.engine import Engine
 from flexglove.parser import Frame
 from flexglove.storage import Storage
@@ -42,6 +43,16 @@ class Glove:
             vals = (OPEN + (FIST - OPEN) * v1, OPEN + (FIST - OPEN) * v2)
             self.e._on_frame(Frame(kind="values", values=vals), self.t)
             self.e.tick(self.t)
+            # Изолированный стенд старого алгоритма. Продуктовый Engine его не вызывает.
+            self.e.commands.roles = self.e.roles()
+            sample = Sample(t=self.t, bits=self.e.bits, grip=self.e.grip,
+                            context={"armed": self.e.controller.armed and self.e.controller.link_ok,
+                                     "bindings": self.e.storage.bindings(), "debounce_s": self.e.debounce_ms / 1000})
+            for event in self.e.commands.update(sample):
+                if event.kind == "command_ignored":
+                    self.e._event("ignored", "Архивный стенд: жест отклонён", "system")
+                else:
+                    self.e.toggle_action(event.data["action"], source="gesture", combo=event.data["combo"])
             self.t += DT
         return self
 

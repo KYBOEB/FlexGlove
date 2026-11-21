@@ -69,7 +69,16 @@
           <div class="small muted">Жест</div>
           <div class="gesture-words" id="gestureWords">—</div>
           <div class="gesture-target" id="mainTarget"></div>
+          <progress id="gestureProgress" max="1" value="0" aria-label="Удержание жеста"></progress>
+          <div class="small" id="gestureReason" role="status"></div>
         </div>
+      </div>
+
+      <div class="side-block">
+        <button id="createGesture">Создать жест</button>
+        <button class="ghost small" id="stopAudioMain">Остановить аудио</button>
+        <a href="#settings">Настроить жесты и аудиофразы</a>
+        <div class="small" id="audioStatus" role="status"></div>
       </div>
 
       <div class="side-block">
@@ -208,23 +217,30 @@
       <div class="card">
         <h2>2. Каналы и пальцы</h2>
         <div class="hand-wrap"><svg id="handSettings" class="hand"></svg></div>
-        <p class="hint">Для каждого канала: какой палец и его роль. <b>Сжатие</b> — палец ведёт захват (среднее сгибов
-          таких пальцев). <b>Команды</b> — палец участвует в жестах. Пока управление активно, пальцы сжатия из жестов
-          исключаются, а команда срабатывает удержанием ≥ 1 с и только если пальцы сжатия при этом неподвижны.</p>
+        <p class="hint">Укажите, какой палец измеряет каждый канал. Жесты используют только измеренные каналы.
+          После изменения соответствия потребуется повторное обучение.</p>
         <div id="fingerMap" class="finger-map"></div>
-        <p class="hint warn-text" id="rolesWarn" hidden></p>
         <div class="row"><span>Рука</span>
           <select id="handSide"><option value="right">правая</option><option value="left">левая</option></select></div>
         <div class="row"><span>MPU6050 закреплён</span><select id="imuMount"></select></div>
         <p class="hint">Оси руки: X — к пальцам, Z — от тыльной стороны кисти. Выберите, куда смотрит ось X модуля
           (стрелка на плате) и какой стороной он приклеен; по умолчанию X — к пальцам, лицом от кожи.</p>
-        <label class="row">Удержание жеста перед срабатыванием, мс <input type="number" id="debounce" min="0" max="2000" step="50"></label>
       </div>
 
-      <div class="card wide">
-        <div class="row between"><h2>3. Жесты-команды</h2><button class="ghost small" id="clearBindings">Удалить все привязки</button></div>
-        <p class="hint">Все сочетания согнутых пальцев. Покажите жест — его карточка подсветится; выберите команду. Одна команда — одно сочетание. «Ладонь раскрыта» — покой, не привязывается.</p>
-        <div class="bind-grid" id="bindGrid"></div>
+      <div class="card wide" id="gestureSettings">
+        <div class="row between"><h2>3. Обучаемые жесты → аудиофразы</h2><button id="createGestureSettings">Создать жест</button></div>
+        <p class="hint">Покажите позу, введите название и держите пальцы неподвижно около секунды.
+          Назначьте свой MP3. После обучения выйдите из позы и покажите её снова: 700 мс устойчивого совпадения → одна фраза.
+          Для повтора нужен выход на 350 мс. Можно сразу перейти к другому жесту.</p>
+        <p class="hint" id="gestureProfile"></p>
+        <div id="trainingStatus" role="status"></div>
+        <button id="cancelTraining" class="ghost small" hidden>Отменить обучение</button>
+        <p class="hint" id="audioFolder"></p>
+        <p class="hint">Добавьте три своих MP3 в указанную папку. Звук играет на компьютере с Python.
+          Старые настройки ARM/hold/light сохранены отдельно и не выполняются.</p>
+        <div id="gestureList" class="gesture-list"></div>
+        <button id="stopAudio" class="ghost">Остановить аудио и очистить очередь</button>
+        <div class="small" id="audioResult" role="status"></div>
       </div>
 
       <details class="card wide advanced">
