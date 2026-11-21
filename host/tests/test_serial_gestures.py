@@ -134,4 +134,3 @@ def test_serial_read_error_reaches_engine_and_cancels_audio(tmp_path):
         assert not rig.audio.pending
     finally:
         rig.storage.close()
-
