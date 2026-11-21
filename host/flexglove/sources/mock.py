@@ -22,7 +22,9 @@ import asyncio
 import itertools
 import math
 import random
+import time
 
+from ..dsp.filters import SampleClock
 from ..dsp.orientation import q_conj, q_from_euler, q_mul, q_rotate
 
 from .base import Source
@@ -178,16 +180,20 @@ class MockSource(Source):
 
     async def _run(self) -> None:
         period = 1.0 / self.rate_hz
-        alpha = period / (TAU_S + period)
+        clock = SampleClock()
         seq = itertools.cycle(AUTO_SEQUENCE)
         step_left = 0.0
         t_sim = 0.0
         while True:
+            # Тот же шаг, что у ImuTracker: sleep задаёт лишь желаемую частоту.
+            # Движение и производная кватерниона должны использовать время обработки (D-22).
+            dt = clock.tick(time.monotonic())
+            alpha = dt / (TAU_S + dt)
             if self.tour:
                 bends = tour_pose(t_sim)[0]
                 self.target = [bends[i % 5] for i in range(self.n)]
             elif self.auto:
-                step_left -= period
+                step_left -= dt
                 if step_left <= 0:
                     bends, step_left = next(seq)
                     self.target = list(bends)
@@ -200,8 +206,8 @@ class MockSource(Source):
                 values.append(str(int(round(v))))
             line = ";".join(values)
             if self.imu:
-                line += "|" + self.imu_sample(t_sim, period)
-            t_sim += period
+                line += "|" + self.imu_sample(t_sim, dt)
+            t_sim += dt
             self.on_raw(line + "\n")
             await asyncio.sleep(period)
 

@@ -1,7 +1,9 @@
 """Этап 4: оси датчика → оси руки, смещение гироскопа (замер и покой), «обнулить положение», крен кисти,
 поворот захвата через контроллер, имитация IMU в демо и сквозной путь через ядро."""
+import asyncio
 import math
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -12,6 +14,8 @@ from flexglove.imu import (CAPTURE_S, DEFAULT_MOUNT, MOUNT_PRESETS, ImuTracker, 
                            twist_deg)
 from flexglove.parser import Frame
 from flexglove.sources.mock import IMU_GYRO_BIAS_DPS, MockSource
+from flexglove.sources import mock
+from flexglove import engine
 from flexglove.storage import Storage
 
 DT = 0.02
@@ -180,6 +184,47 @@ def test_rotation_deadband_hold_and_link_loss():
 
 
 # ---------------- имитация IMU ----------------
+@pytest.mark.parametrize("intervals", [(0.02,), (0.025,), (0.03,), (0.01, 0.045, 0.02, 0.035)])
+def test_mock_run_imu_uses_processing_time(monkeypatch, intervals):
+    """Настоящий цикл демо при задержках планировщика: виртуальные часы, без ожидания по стене."""
+    now = 100.0
+    count = 0
+    commanded = False
+    e, m = engine_with_mock()
+    clock = SimpleNamespace(monotonic=lambda: now, time=lambda: now)
+    monkeypatch.setattr(mock, "time", clock, raising=False)
+    monkeypatch.setattr(engine, "time", clock)
+
+    def on_raw(line):
+        nonlocal commanded
+        e.on_raw(line)
+        e.tick(now)
+        if not commanded and now >= 103.0:
+            o = e.imu_tracker.snapshot(now)
+            assert o["bias_ok"] and o["zeroed"]
+            assert o["pitch"] == pytest.approx(90, abs=1)
+            m.set_angles(roll=30)
+            commanded = True
+
+    async def sleep(period):
+        nonlocal now, count
+        assert period == DT
+        now += intervals[count % len(intervals)]
+        count += 1
+        if now >= 106.0:
+            raise asyncio.CancelledError
+
+    m.on_raw = on_raw
+    monkeypatch.setattr(mock, "asyncio", SimpleNamespace(sleep=sleep))
+    with pytest.raises(asyncio.CancelledError):
+        asyncio.run(m._run())
+    assert commanded and e.unparsed_total == 0
+    assert m.angles == pytest.approx([30, 90, 0], abs=0.01)
+    o = e.imu_tracker.snapshot(now)
+    assert o["wrist_roll"] == pytest.approx(30, abs=4)
+    assert o["pitch"] == pytest.approx(90, abs=1)
+
+
 def test_mock_imu_line_format_and_physics():
     m = MockSource(lambda *a, **k: None, lambda **k: None, n_channels=2)
     m.angle_target = [0.0, 0.0, 0.0]                  # ладонь вниз, пальцы вперёд (исходная поза демо — пальцы вверх)
@@ -253,16 +298,21 @@ def test_imu_api_in_demo(tmp_path):
     app = create_app(tmp_path / "t.db", demo=True)
     with TestClient(app) as c:
         assert len(c.get("/api/meta").json()["imu_mounts"]) == 8
-        t0 = time.time()
-        while time.time() - t0 < 5:
+        t0 = time.monotonic()
+        while time.monotonic() - t0 < 5:
             o = c.get("/api/state").json()["orientation"]
             if o and o["zeroed"]:
                 break
             time.sleep(0.1)
         assert o and o["bias_ok"] and o["zeroed"]
         assert c.post("/api/mock", json={"roll": 30}).json()["angles"][0] == 30
-        time.sleep(1.5)
-        assert c.get("/api/state").json()["orientation"]["wrist_roll"] == pytest.approx(30, abs=4)
+        deadline = time.monotonic() + 1.5
+        while time.monotonic() < deadline:
+            o = c.get("/api/state").json()["orientation"]
+            if o and o["wrist_roll"] == pytest.approx(30, abs=4):
+                break
+            time.sleep(0.02)
+        assert o and o["wrist_roll"] == pytest.approx(30, abs=4), o
         assert c.post("/api/imu/zero").status_code == 200
         assert c.post("/api/imu/calibrate").json()["calibrating"] is True
         assert c.post("/api/settings", json={"imu_mount": "bad"}).status_code == 400
