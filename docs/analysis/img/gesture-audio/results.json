@@ -1,0 +1,25 @@
+{
+  "results": [
+    {
+      "viewport": [
+        1366,
+        768
+      ],
+      "reference_channels": 5,
+      "recognized": true,
+      "missing_audio": true,
+      "orientation_no_repeat": true
+    },
+    {
+      "viewport": [
+        1920,
+        1080
+      ],
+      "reference_channels": 5,
+      "recognized": true,
+      "missing_audio": true,
+      "orientation_no_repeat": true
+    }
+  ],
+  "page_errors": []
+}
