@@ -25,6 +25,10 @@ jobs:
       - name: UI syntax and MP3 backend import (no audio device)
         run: |
           node --check flexglove/web/app.js
+          node --check flexglove/web/chart.js
+          node --check flexglove/web/hand.js
+          node --check flexglove/web/handpose.js
+          node --check flexglove/web/hand3d.js
           python -c "import pygame.mixer; print('MP3 backend imports; device not opened')"
       - name: Windows BLE backend imports
         if: runner.os == 'Windows'

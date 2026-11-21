@@ -1,8 +1,4 @@
-/* FlexGlove — интерфейс. Состояние приходит по WebSocket (/ws) ~30 раз в секунду, команды уходят через REST (/api).
-   Этап 4б: главный экран «Рука» — большая 3D-рука (hand3d.js) и узкая панель справа: пальцы процентами и словами,
-   жест словами, связь, IMU и калибровка. «Рабочая зона» и карточка контроллера убраны из интерфейса (D-26), ядро
-   распознаёт обученные позы и воспроизводит фразы на Python. Старый автомат команд отключён (D-35).
-   Двоичная строка комбинации осталась только в «Отладке потока». */
+/* FlexGlove: четыре экрана, единый поток состояния и обработчики REST. */
 (function () {
   const $ = (s) => document.querySelector(s);
   const $$ = (s) => Array.from(document.querySelectorAll(s));
@@ -15,7 +11,6 @@
 
   const handSettings = new HandView($("#handSettings"));
   const handMain = new HandView($("#handMain"), { onFinger: (f) => demoToggleFinger(f) });   // 2D, если нет WebGL
-  const gestureMini = new HandView($("#gestureMini"), { static: true });
   const wzHand = new HandView($("#wzHand"), { static: true });
   const chart = new LaneChart($("#chart"));
   let hand3d = null;                                   // 3D-рука (hand3d.js, ES-модуль); null — 2D-силуэт
@@ -66,9 +61,13 @@
 
   // ---------------- вкладки ----------------
   function showTab() {
-    const tab = ["#signals", "#settings"].includes(location.hash) ? location.hash.slice(1) : "hand";
+    const tab = ["#gestures", "#signals", "#settings"].includes(location.hash) ? location.hash.slice(1) : "hand";
     $$(".page").forEach((p) => (p.hidden = p.id !== "tab-" + tab));
-    $$(".tab").forEach((a) => a.classList.toggle("active", a.dataset.tab === tab));
+    $$(".tab").forEach((a) => {
+      a.classList.toggle("active", a.dataset.tab === tab);
+      if (a.dataset.tab === tab) a.setAttribute("aria-current", "page");
+      else a.removeAttribute("aria-current");
+    });
     document.body.classList.toggle("on-hand", tab === "hand");
     if (tab === "signals") refreshRecordings();
   }
@@ -79,8 +78,11 @@
   function connectionLost() {
     wsLive = false;
     $("#sideDot").className = "dot";
-    $("#sideSrc").textContent = "Нет связи с приложением — переподключаюсь…";
+    $("#sideSrc").textContent = "Нет связи с приложением. Переподключение…";
     $("#sideImu").textContent = "Данные IMU устарели";
+    $("#gestureWords").textContent = "Нет связи с приложением";
+    $("#gestureProgress").hidden = true;
+    $("#gestureReason").hidden = true;
     $("#sideErrors").textContent = "Поток состояния недоступен";
     $("#sideErrors").hidden = false;
     $("#srcDot").className = "dot";
@@ -109,7 +111,7 @@
     $("#noDeviceBanner").hidden = connected;
     const warns = S.warnings || [];
     const wbox = $("#streamWarn");
-    const whtml = warns.map((w) => `<div>⚠ ${w}</div>`).join("");
+    const whtml = warns.map((w) => `<div>${esc(w)}</div>`).join("");
     if (wbox.innerHTML !== whtml) wbox.innerHTML = whtml;
     wbox.hidden = !warns.length;
 
@@ -125,8 +127,8 @@
     $("#demoStrip").hidden = !isMock;
     document.body.classList.toggle("demo", isMock);
     if (isMock) syncDemo(src.demo);
-    // 3D-рука кадрируется по видимой части сцены: сверху — строка углов, снизу — полоса демо (если есть)
-    if (hand3d) hand3d.setInsets({ top: 36, bottom: isMock ? $("#demoStrip").offsetHeight + 22 : 12 });
+    // Полоса демо исключена из доступной сцены; центр ладони остаётся неподвижным.
+    if (hand3d) hand3d.setInsets({ top: 36, bottom: isMock ? $("#demoStrip").offsetHeight + 24 : 12 });
 
     // сигналы
     if (S.mode !== "none") {
@@ -142,7 +144,7 @@
     renderWizard();
 
     // настройки
-    $("#srcDot").className = "dot" + (connected ? " ok" : src.kind ? " wait" : "");
+    $("#srcDot").className = "dot" + (connected && !chans.some(c => c.stale) ? " ok" : src.kind ? " wait" : "");
     $("#srcName").textContent = connected ? (src.name || "Подключено") : "Не подключено";
     $("#srcMsg").textContent = src.message || "";
     $("#disconnectBtn").disabled = !src.kind;
@@ -163,41 +165,53 @@
     const mt = $("#imuMount"); if (document.activeElement !== mt && ori) mt.value = ori.mount;
   }
 
-  /** Статус калибровки для главного экрана и «Сигналов». */
+  /** Статус сохранённой калибровки для настроек и диагностики. */
   function calibrationStatus(chans) {
-    if (S.source?.kind === "mock") return { cls: "ok", text: "✓ Демо: известные диапазоны генератора" };
+    if (S.source?.kind === "mock") return { cls: "ok", text: "Демо: известные диапазоны генератора" };
     const live = chans.filter((c) => !c.stale && c.mode !== "bits");
-    if (!live.length) return { cls: "", text: S.mode === "bits" ? "Перчатка присылает готовые 0/1 — калибровка не нужна" : "" };
+    if (!live.length) return { cls: "", text: S.mode === "bits" ? "Перчатка присылает готовые 0/1, калибровка не нужна" : "" };
     const cal = live.filter((c) => c.mode === "calibrated").length;
-    if (cal === live.length) return { cls: "ok", text: `✓ Калибровка выполнена (${cal} из ${live.length})` };
-    if (cal) return { cls: "warn", text: `Калибровка частичная: ${cal} из ${live.length} — нажмите «Калибровка»` };
-    return { cls: "warn", text: "⚠ Нужна калибровка — сгиб сейчас приблизительный. Нажмите «Калибровка»" };
+    if (cal === live.length) return { cls: "ok", text: `Калибровка выполнена (${cal} из ${live.length})` };
+    if (cal) return { cls: "warn", text: `Калибровка частичная: ${cal} из ${live.length}. Откройте калибровку в настройках` };
+    return { cls: "warn", text: "Нужна калибровка. Сгиб приблизительный. Откройте настройки" };
   }
 
   function renderSide(src, connected, chans, map, ori) {
-    $("#sideDot").className = "dot" + (connected ? " ok" : src.kind ? " wait" : "");
-    $("#sideSrc").textContent = connected ? `${src.name || "Перчатка"} · ${S.stats.rate} Гц` : (src.message || "Не подключено");
-    $("#sideImu").textContent = !connected ? "" : !ori ? "Без датчика ориентации — рука показана пальцами вверх"
-      : ori.calibrating ? "⏳ Калибровка гироскопа: держите руку неподвижно 2 с"
+    $("#sideDot").className = "dot" + (connected && !chans.some(c => c.stale) ? " ok" : src.kind ? " wait" : "");
+    $("#sideSrc").textContent = connected ? `${src.name || "Перчатка"}${chans.some(c => c.stale) ? ": данные устарели" : ""}` : (src.message || "Не подключено");
+    $("#sideImu").textContent = !connected ? "" : !ori ? "Без датчика ориентации. Пальцы направлены вверх"
+      : ori.calibrating ? "Калибровка гироскопа: держите руку неподвижно 2 с"
       : ori.stale ? "Нет данных MPU6050" : `MPU6050: ${ori.bias_ok ? "гироскоп откалиброван" : "гироскоп калибруется в покое"} · ${ori.at_rest ? "покой" : "движение"}`;
     const errors = [...(S.warnings || [])];
     if (S.stats.unparsed) errors.push(`Ошибки разбора: ${S.stats.unparsed}`);
+    if (ori?.message?.includes("не принята")) errors.push(ori.message);
     $("#sideErrors").textContent = errors.join(" · ");
     $("#sideErrors").hidden = !errors.length;
-    const cs = calibrationStatus(chans);
-    const sc = $("#sideCal"); sc.textContent = cs.text; sc.className = "small cal-status " + cs.cls;
 
     const gs = S.gesture_system || {}, ts = gs.templates || [];
-    const candidate = ts.find(t => t.id === gs.candidate);
-    const fired = ts.find(t => t.id === gs.triggered?.gesture_id);
-    $("#gestureWords").textContent = candidate?.name || "Неизвестный жест";
-    gestureMini.set(bendsByFinger(chans.map(c => c.bend), map));
-    $("#mainTarget").textContent = fired ? `Сработал: ${fired.name} · № ${gs.triggered.sequence}` : "Ещё не срабатывал";
-    $("#gestureProgress").value = gs.hold_progress || 0;
-    $("#gestureReason").textContent = gs.reason || "";
-    const audio = S.audio || {};
-    $("#audioStatus").textContent = audio.active ? `Играет: ${audio.active.file}`
-      : `Аудио: ${audio.queue?.length || 0} в очереди`;
+    const fresh = connected && chans.length > 0 && chans.every(c => !c.stale)
+      && !gs.reason?.startsWith("Недостаточно свежих данных");
+    const candidate = fresh && ts.find(t => t.id === gs.candidate && t.compatible);
+    const calibrated = chans.length > 0 && chans.every(c => c.mode === "calibrated");
+    let main = "Покажите жест";
+    if (!connected) main = "Подключите источник";
+    else if (!fresh) main = "Нет свежих данных";
+    else if (gs.training) main = `Обучение: ${gs.training.name}`;
+    else if (S.mode !== "values") main = "Нужны непрерывные значения АЦП";
+    else if (S.calibrating || (S.wizard?.step && S.wizard.step !== "idle") || ori?.calibrating
+      || gs.reason?.startsWith("Во время калибровки"))
+      main = "Дождитесь окончания калибровки";
+    else if (!calibrated) main = "Откалибруйте все каналы в настройках";
+    else if (!ts.length) main = "Создайте жест на экране «Жесты»";
+    else if (!ts.some(t => t.compatible)) main = "Переобучите жесты для текущих настроек";
+    else if (candidate) main = candidate.name;
+    if ($("#gestureWords").textContent !== main) $("#gestureWords").textContent = main;
+    const holding = !!candidate && main === candidate.name && !gs.training;
+    $("#gestureProgress").hidden = !holding;
+    $("#gestureProgress").value = holding ? gs.hold_progress || 0 : 0;
+    $("#gestureReason").hidden = !holding;
+    $("#gestureReason").textContent = holding
+      ? (gs.latched === candidate.id || gs.needs_exit ? "Для повтора выйдите из позы" : "Удерживайте позу") : "";
 
     // пальцы: название, полоса, слово; мелко — сырое и «Δ от ладони»
     const key = chans.length + "|" + map.join();
@@ -224,7 +238,7 @@
     });
     const missing = 5 - Math.min(5, S.n_channels || 0);
     $("#fingerNote").textContent = !S.n_channels ? "Подключите перчатку или демо"
-      : missing ? `Остальные пальцы без сенсора — на 3D-руке показаны светлыми, в спокойной позе` : "";
+      : missing ? `Пальцы без сенсора показаны светлыми` : "";
 
     // ориентация
     $("#imuBox").hidden = !ori;
@@ -234,10 +248,9 @@
       $("#imuPitch").textContent = `${deg(ori.pitch)} ${ori.pitch > 25 ? "вверх" : ori.pitch < -25 ? "вниз" : ""}`;
       $("#imuRoll").textContent = rollText; $("#imuYaw").textContent = deg(ori.yaw);
       $("#imuStatus").textContent = ori.message && ori.message.includes("не принята") ? ori.message
-        : `Поворот вокруг вертикали у MPU6050 медленно уходит (≈ ${String(ori.yaw_drift_deg_min).replace(".", ",")}°/мин) — направьте пальцы на экран и нажмите «Обнулить поворот».`;
+        : `Поворот вокруг вертикали у MPU6050 медленно уходит (≈ ${String(ori.yaw_drift_deg_min).replace(".", ",")}°/мин). Направьте пальцы на экран и нажмите «Обнулить поворот».`;
     }
     $("#imuZero").disabled = $("#imuCal").disabled = !ori || !!ori.calibrating;
-    $("#stagePose").textContent = !ori ? "" : `пальцы ${deg(ori.pitch)} · крен ${rollText} · поворот ${deg(ori.yaw)}`;
   }
   const fmtDelta = (d) => `${d > 0 ? "+" : d < 0 ? "−" : ""}${Math.abs(Math.round(d))}`;
   const deg = (x) => `${x > 0 ? "+" : x < 0 ? "−" : ""}${Math.abs(Math.round(x || 0))}°`;
@@ -249,8 +262,8 @@
     lastEventTs = newest;
     $("#eventLog").innerHTML = ev.length ? ev.map((e) => {
       const t = new Date(e.ts * 1000).toLocaleTimeString("ru-RU");
-      const how = e.source === "gesture" ? ` · жест «${comboWords(e.combo, S.finger_map)}»` : e.source === "manual" ? " · вручную" : "";
-      return `<li class="${e.source === "system" ? "sys" : ""}"><span class="time">${t}</span><span>${e.text}${how}</span></li>`;
+      const how = e.source === "gesture" && e.combo ? ` · жест «${comboWords(e.combo, S.finger_map)}»` : e.source === "manual" ? " · вручную" : "";
+      return `<li class="${e.source === "system" ? "sys" : ""}"><span class="time">${t}</span><span>${esc(e.text.replace(/ \(событие \d+\)/g, ""))}${how}</span></li>`;
     }).join("") : `<li class="muted">Пока ничего не произошло</li>`;
   }
 
@@ -278,19 +291,19 @@
     });
     const cs = calibrationStatus(chans);
     $("#sigHint").textContent = S.mode === "values"
-      ? (cs.cls === "warn" ? "Без калибровки сгиб считается по автокалибровке (от уровня при подключении) — это приблизительно. Нажмите «Калибровка…»: 3 с ладонь, 3 с кулак." : "")
-      : S.mode === "bits" ? "Перчатка присылает готовые 0/1 — графики показывают только состояния." : "";
+      ? (cs.cls === "warn" ? "Без калибровки сгиб считается по автокалибровке (от уровня при подключении), это приблизительно. Выполните калибровку в настройках." : "")
+      : S.mode === "bits" ? "Перчатка присылает готовые 0/1, графики показывают только состояния." : "";
   }
 
   function renderSignalsToolbar() {
     const r = S.recording;
     const btn = $("#recBtn");
-    btn.textContent = r.active ? "■ Остановить запись" : "● Начать запись";
+    btn.textContent = r.active ? "Остановить запись" : "Начать запись";
     btn.classList.toggle("rec-on", r.active);
     $("#recStatus").textContent = r.active ? `${r.file} · строк: ${r.rows}` : (r.file ? `последняя: ${r.file}` : "");
     const calOk = S.mode === "values" && S.source?.kind !== "mock";
     $("#calReset").disabled = S.source?.kind === "mock";
-    $("#calWizardBtn").disabled = $("#openWizard").disabled = !calOk;
+    $("#calWizardBtn").disabled = !calOk;
     const cs = calibrationStatus(S.channels || []);
     $("#calStatus").textContent = S.source?.kind === "mock" || calOk ? cs.text : "нужен поток значений АЦП";
   }
@@ -302,8 +315,8 @@
     mapKey = key;
     const opts = (sel) => META.fingers.map((f) => `<option value="${f}" ${f === sel ? "selected" : ""}>${fname(f)}</option>`).join("");
     $("#fingerMap").innerHTML = Array.from({ length: shown }, (_, i) =>
-      `<div class="fm-row"><span><span class="swatch" style="background:${CHANNEL_COLORS[i]}"></span>Канал S${i + 1}</span>
-        <select data-ch="${i}">${opts(map[i])}</select></div>`).join("");
+      `<div class="fm-row"><label for="finger-${i}"><span class="swatch" style="background:${CHANNEL_COLORS[i]}"></span>Канал S${i + 1}</label>
+        <select id="finger-${i}" data-ch="${i}">${opts(map[i])}</select></div>`).join("");
   }
 
   // Имена и названия файлов приходят из пользовательских данных; всегда экранируем HTML.
@@ -321,34 +334,54 @@
   }
   setInterval(refreshAudioFiles, 3000);
 
+  function compatibilityReason(t, gs) {
+    if (t.compatible) return "Готов к распознаванию";
+    if (t.context.profile !== gs.profile) return "Подключите источник, с которым обучали жест";
+    const reasons = [];
+    if (t.context.channels.length !== S.n_channels) reasons.push("число каналов");
+    else {
+      if (t.context.channels.some((c, i) => c.finger !== S.finger_map[i])) reasons.push("соответствие пальцам");
+      if (t.context.channels.some((c, i) => c.calibration.open !== S.channels[i].cal.open || c.calibration.fist !== S.channels[i].cal.fist)) reasons.push("калибровка");
+    }
+    if (t.context.hand !== S.hand) reasons.push("рука");
+    if (JSON.stringify(t.context.pipeline) !== JSON.stringify(S.pipeline.config)) reasons.push("обработка");
+    return reasons.length ? `Изменены настройки: ${reasons.join(", ")}. Обучите жест заново.`
+      : "Изменился формат каналов. Обучите жест заново.";
+  }
+
   function renderGestures() {
     const gs = S.gesture_system || {}, templates = gs.templates || [];
-    $("#gestureProfile").textContent = `Профиль: ${{demo:"демо", glove:"перчатка", replay:"запись"}[gs.profile] || "нет данных"}. Удержание: 700 мс; выход: 350 мс.`;
     $("#audioFolder").textContent = `Папка MP3: ${audioFolder || "audio рядом с FlexGlove.pyw"}`;
     const tr = gs.training, result = gs.training_result;
-    $("#trainingStatus").textContent = tr ? `Обучение «${tr.name}»: ${Math.round(tr.progress * 100)} % — не двигайтесь`
+    $("#trainingStatus").textContent = tr ? `Обучение «${tr.name}»: ${Math.round(tr.progress * 100)} %. Не двигайтесь`
       : result ? `${result.message}${result.similar?.length ? " · Внимание: похожие эталоны: " + result.similar.join(", ") + ". Выберите более разные позы." : ""}` : "";
+    $("#trainingStatus").classList.toggle("error-text", result?.status === "error" && !tr);
     $("#cancelTraining").hidden = !tr;
     $("#createGesture").disabled = !!tr;
-    $("#createGestureSettings").disabled = !!tr;
-    const key = JSON.stringify([templates, audioFiles]);
+    const key = JSON.stringify([templates, audioFiles, gs.profile]);
     if (key !== gestureKey && !$("#gestureList select:focus")) {
       gestureKey = key;
       $("#gestureList").innerHTML = templates.length ? templates.map(t => {
         const files = [...new Set([...audioFiles, ...(t.audio ? [t.audio] : [])])];
         return `<div class="learned-gesture" data-id="${esc(t.id)}">
-          <strong>${esc(t.name)}</strong><span class="small">${esc(t.context.profile)} · ${t.context.channels.length} кан. · ${t.compatible ? "совместим" : "нужно переобучить / другой профиль"}</span>
-          <label>Аудиофраза <select data-audio="${esc(t.id)}"><option value="">Аудио не назначено</option>${files.map(f => `<option value="${esc(f)}" ${f === t.audio ? "selected" : ""}>${esc(f)}${audioFiles.includes(f) ? "" : " — недоступно"}</option>`).join("")}</select></label>
-          <span class="small">${t.audio_available ? "MP3 доступен" : "Аудио не назначено/недоступно"}</span>
+          <strong>${esc(t.name)}</strong><span class="small">${esc(compatibilityReason(t, gs))}</span>
+          <label>Аудиофраза <select data-audio="${esc(t.id)}"><option value="">Аудио не назначено</option>${files.map(f => `<option value="${esc(f)}" ${f === t.audio ? "selected" : ""}>${esc(f)}${audioFiles.includes(f) ? "" : " (файл отсутствует)"}</option>`).join("")}</select></label>
+          <span class="small">${t.audio_available ? "MP3 доступен" : t.audio ? "Файл MP3 отсутствует в папке" : "Аудио не назначено"}</span>
           <div class="row"><button class="ghost small" data-gesture-action="rename">Переименовать</button>
-          <button class="ghost small" data-gesture-action="retrain" ${t.context.profile !== gs.profile ? 'disabled title="Для другого профиля создайте новый жест"' : ""}>Обучить заново</button>
+          <button class="ghost small" data-gesture-action="retrain" ${t.context.profile !== gs.profile ? 'disabled title="Переключите источник на тот, с которым обучали жест"' : ""}>Обучить заново</button>
           <button class="ghost small" data-gesture-action="test">Проверить аудио</button>
           <button class="ghost small" data-gesture-action="delete">Удалить</button></div></div>`;
       }).join("") : `<p class="muted">Жестов пока нет. Покажите позу и нажмите «Создать жест».</p>`;
     }
     const r = S.audio?.results?.[0];
     const status = {queued:"поставлено в очередь", playing:"воспроизводится", finished:"воспроизведение завершено", unavailable:"аудио не назначено/недоступно", error:"ошибка проигрывателя", cancelled:"отменено", duplicate:"уже в очереди или играет", full:"очередь заполнена", stopped:"остановлено"};
-    $("#audioResult").textContent = r ? `Задание № ${r.job_id}: ${status[r.status] || r.status}${r.message ? " · " + r.message : ""}` : "Воспроизведений пока не было";
+    $("#audioResult").hidden = !r;
+    $("#audioResult").textContent = r ? `${status[r.status] || r.status}${r.message ? ": " + r.message : ""}` : "";
+    $("#audioResult").classList.toggle("error-text", ["error", "unavailable"].includes(r?.status));
+    const audio = S.audio || {};
+    $("#audioStatus").hidden = !audio.active && !audio.queue?.length;
+    $("#audioStatus").textContent = audio.active ? `Играет: ${audio.active.file}`
+      : audio.queue?.length ? `В очереди: ${audio.queue.length}` : "";
   }
   async function createGesture() {
     const name = prompt("Название жеста. Покажите позу и держите её неподвижно около секунды:");
@@ -357,9 +390,8 @@
     catch(e) { toast(e.message, true); }
   }
   $("#createGesture").addEventListener("click", createGesture);
-  $("#createGestureSettings").addEventListener("click", createGesture);
   $("#cancelTraining").addEventListener("click", () => api("/api/gestures/cancel", {method:"POST"}).catch(e => toast(e.message, true)));
-  for (const id of ["#stopAudio", "#stopAudioMain"]) $(id).addEventListener("click", () => api("/api/audio/stop", {method:"POST"}).catch(e => toast(e.message, true)));
+  $("#stopAudio").addEventListener("click", () => api("/api/audio/stop", {method:"POST"}).catch(e => toast(e.message, true)));
   $("#gestureList").addEventListener("click", async e => {
     const button = e.target.closest("button[data-gesture-action]");
     if (!button) return;
@@ -386,7 +418,7 @@
   const OPEN_POSE = { thumb: 0, index: 0, middle: 0, ring: 0, pinky: 0 };
   const FIST_POSE = { thumb: 1, index: 1, middle: 1, ring: 1, pinky: 1 };
   function openWizard() {
-    if (!S || S.mode !== "values") return toast("Калибровка возможна только при потоке значений АЦП — подключите перчатку", true);
+    if (!S || S.mode !== "values") return toast("Подключите источник значений АЦП для калибровки", true);
     WZ.open = true; WZ.phase = "intro"; $("#wizard").hidden = false;
     api("/api/calibration/wizard-cancel", { method: "POST" }).catch(() => {});
     renderWizard();
@@ -443,10 +475,9 @@
     const bad = rows.filter((r) => r.grade === "flat" || r.grade === "no_data").length;
     const weak = rows.filter((r) => r.grade === "weak").length;
     $("#wzHint").textContent = bad ? `Каналов без изменения: ${bad}. Проверьте сенсор и провод (у такого канала сгиб будет приблизительным). Можно сохранить остальные или повторить.`
-      : weak ? "Есть каналы со слабым сигналом — сгиб будет шумнее. Попробуйте согнуть палец сильнее и повторить."
-      : "Все каналы в порядке. Размах — насколько меняется значение от ладони к кулаку; шум — разброс в неподвижной позе.";
+      : weak ? "Слабый сигнал. Согните палец сильнее и повторите замер."
+      : "Все каналы в порядке.";
   }
-  $("#openWizard").addEventListener("click", openWizard);
   $("#calWizardBtn").addEventListener("click", openWizard);
   $("#wzCancel").addEventListener("click", closeWizard);
   $("#wzGo").addEventListener("click", () => startStep(S.wizard && S.wizard.step === "open_done" ? "fist" : "open"));
@@ -506,7 +537,7 @@
         await api("/api/settings", { method: "POST", body: { hand: t.value } });
       } else if (t.id === "imuMount") {
         await api("/api/settings", { method: "POST", body: { imu_mount: t.value } });
-        toast("Крепление модуля изменено — ориентация начата заново (калибровка 2 с)");
+        toast("Крепление изменено. Держите руку неподвижно 2 с");
       } else if (t.id === "mockAuto") {
         await api("/api/mock", { method: "POST", body: { auto: t.checked } });
       } else if (t.id === "mockTour") {
@@ -539,7 +570,7 @@
     api("/api/mock", { method: "POST", body: { bends: Array(S.n_channels || 5).fill(v) } }).catch(() => {});
   });
 
-  $("#imuZero").addEventListener("click", () => api("/api/imu/zero", { method: "POST" }).then(() => toast("Поворот обнулён: текущее направление пальцев — «в экран»")).catch((e) => toast(e.message, true)));
+  $("#imuZero").addEventListener("click", () => api("/api/imu/zero", { method: "POST" }).then(() => toast("Поворот обнулён")).catch((e) => toast(e.message, true)));
   $("#imuCal").addEventListener("click", () => api("/api/imu/calibrate", { method: "POST" }).catch((e) => toast(e.message, true)));
   $("#viewReset").addEventListener("click", () => { if (hand3d) hand3d.resetView(); });
 
@@ -576,8 +607,8 @@
   async function refreshPorts() {
     try {
       const ports = await api("/api/serial/ports");
-      $("#serialPort").innerHTML = `<option value="">— порт —</option>` +
-        ports.map((p) => `<option value="${p.port}">${p.port}${p.description ? " — " + p.description : ""}</option>`).join("");
+      $("#serialPort").innerHTML = `<option value="">Не выбран</option>` +
+        ports.map((p) => `<option value="${p.port}">${p.port}${p.description ? ": " + p.description : ""}</option>`).join("");
     } catch (err) { toast(err.message, true); }
   }
   $("#serialRefresh").addEventListener("click", refreshPorts);
@@ -602,7 +633,7 @@
       else await api("/api/recording/start", { method: "POST" });
     } catch (err) { toast(err.message, true); }
   });
-  // фильтрация: пресеты конвейера и свой JSON (dsp, этап 3) — в «Настройки → Дополнительно»
+  // Обработка: пресеты и свой JSON в закрытом разделе экрана «Сигналы».
   let PIPE = { presets: [], filters: [] }, pipeKey = "";
   async function loadPipelines() {
     try { PIPE = await api("/api/pipelines"); } catch (e) { return; }
@@ -613,6 +644,7 @@
   }
   function renderPipeline() {
     const cur = S.pipeline || {}, key = JSON.stringify(cur);
+    $("#pipeCurrent").textContent = `Действует: ${cur.title || "нет данных"}`;
     const mp = $("#motionPill"); mp.textContent = S.motion ? "движение" : "покой"; mp.className = "pill" + (S.motion ? " motion" : "");
     if (key === pipeKey || !PIPE.presets.length) return;
     pipeKey = key;
@@ -629,15 +661,20 @@
     if (id === "custom" && !$("#pipeJson").value) $("#pipeJson").value = JSON.stringify((S.pipeline || {}).config || []);
   }
   async function applyPipeline(preset, config) {
+    if (!confirm("Изменение обработки сделает сохранённые жесты несовместимыми. Потребуется переобучение. Применить обработку?")) {
+      $("#pipePreset").value = S.pipeline.preset;
+      showPipeHint(S.pipeline.preset);
+      return;
+    }
     try {
       const r = await api("/api/pipeline", { method: "POST", body: { preset, config } });
       $("#pipeJson").classList.remove("bad");
       toast(`Фильтрация: ${r.title}`); chart.clear();
-    } catch (e) { $("#pipeJson").classList.add("bad"); toast(e.message, true); }
+    } catch (e) { $("#pipeJson").classList.add("bad"); $("#pipePreset").value = S.pipeline.preset; showPipeHint(S.pipeline.preset); toast(e.message, true); }
   }
   $("#pipePreset").addEventListener("change", (e) => {
     showPipeHint(e.target.value);
-    if (e.target.value !== "custom") applyPipeline(e.target.value);
+    if (e.target.value !== "custom" && e.target.value !== S.pipeline.preset) applyPipeline(e.target.value);
   });
   $("#pipeApply").addEventListener("click", () => {
     let cfg;
@@ -662,7 +699,7 @@
     if (S && S.source.kind === "mock") api("/api/mock", { method: "POST", body: { bends: Array(S.n_channels).fill(0) } }).catch(() => {});
     if (S && S.recording.active) {
       const r = await api("/api/recording/stop", { method: "POST" }).catch(() => null);
-      if (r) toast(save ? `Запись по протоколу сохранена: data/recordings/${r.file} — разбор: python tools/analyze_recording.py` : `Запись прервана: ${r.file}`, !save);
+      if (r) toast(save ? `Запись по протоколу сохранена: data/recordings/${r.file}` : `Запись прервана: ${r.file}`, !save);
       refreshRecordings();
     }
   }
@@ -682,7 +719,7 @@
       while (acc + PROTO[i][1] <= el) acc += PROTO[i++][1];
       const [kind, dur] = PROTO[i], bendNo = Math.floor((i + 1) / 2);
       $("#protoStep").textContent = `Запись по протоколу · ${who} · шаг ${i + 1} из ${PROTO.length}`;
-      $("#protoCmd").textContent = kind === "rest" ? "Покой — ладонь раскрыта" : kind === "bend" ? `Согнуть ${who} (${bendNo} из 5)` : "Разогнуть";
+      $("#protoCmd").textContent = kind === "rest" ? "Покой: ладонь раскрыта" : kind === "bend" ? `Согнуть ${who} (${bendNo} из 5)` : "Разогнуть";
       $("#protoCmd").className = "proto-cmd" + (kind === "bend" ? " bend" : "");
       $("#protoLeft").textContent = Math.ceil(acc + dur - el);
       $("#protoBar").style.width = `${Math.round((el / total) * 100)}%`;
@@ -701,7 +738,7 @@
     try {
       const list = await api("/api/recordings");
       const sel = $("#recList"), cur = sel.value;
-      sel.innerHTML = `<option value="">— записи приложения —</option>` + list.map((f) => `<option ${f.name === cur ? "selected" : ""}>${f.name}</option>`).join("");
+      sel.innerHTML = `<option value="">Не выбрана</option>` + list.map((f) => `<option ${f.name === cur ? "selected" : ""}>${f.name}</option>`).join("");
     } catch (e) { /* ignore */ }
   }
   $("#recPlay").addEventListener("click", async () => {
@@ -719,7 +756,7 @@
     const k = parseInt(e.key, 10);
     if (k >= 1 && k <= S.n_channels) demoToggleFinger(S.finger_map[k - 1]);
     const arrows = { ArrowLeft: ["rollSlider", -15], ArrowRight: ["rollSlider", 15], ArrowUp: ["pitchSlider", 15], ArrowDown: ["pitchSlider", -15] };
-    if (arrows[e.key] && !["#signals", "#settings"].includes(location.hash)) {
+    if (arrows[e.key] && !["#gestures", "#signals", "#settings"].includes(location.hash)) {
       e.preventDefault();
       const [id, step] = arrows[e.key], sl = $("#" + id);
       sl.value = Math.max(+sl.min, Math.min(+sl.max, +sl.value + step));

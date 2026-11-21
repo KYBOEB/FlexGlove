@@ -1,0 +1,75 @@
+{
+  "U1 eyebrow": {
+    "count": 0,
+    "examples": []
+  },
+  "U2 decorative numbering": {
+    "count": 0,
+    "examples": []
+  },
+  "U6 status string": {
+    "count": 5,
+    "examples": [
+      "host/flexglove/web\\app.js:157",
+      "host/flexglove/web\\app.js:157",
+      "host/flexglove/web\\app.js:188",
+      "host/flexglove/web\\app.js:265",
+      "host/flexglove/web\\app.js:721"
+    ]
+  },
+  "U9 badge word": {
+    "count": 0,
+    "examples": []
+  },
+  "U10 status dot": {
+    "count": 0,
+    "examples": []
+  },
+  "U11 emoji": {
+    "count": 0,
+    "examples": []
+  },
+  "U11 icon tile": {
+    "count": 0,
+    "examples": []
+  },
+  "U12 chart-type title": {
+    "count": 0,
+    "examples": []
+  },
+  "U13 reading instructions": {
+    "count": 0,
+    "examples": []
+  },
+  "U15 chart scaffolding": {
+    "count": 0,
+    "examples": []
+  },
+  "U16 legend": {
+    "count": 0,
+    "examples": []
+  },
+  "unslop 13 em dash": {
+    "count": 0,
+    "examples": []
+  },
+  "U17 gradient or glow": {
+    "count": 1,
+    "examples": [
+      "host/flexglove/web\\style.css:154"
+    ]
+  },
+  "U18 off-scale spacing": {
+    "count": 0,
+    "examples": []
+  },
+  "U19 extra-heavy weight": {
+    "count": 0,
+    "examples": []
+  },
+  "U20 motion": {
+    "count": 0,
+    "examples": []
+  },
+  "total": 6
+}

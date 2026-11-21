@@ -28,9 +28,9 @@ def main():
             page = browser.new_page(viewport={"width": width, "height": height})
             page.on("pageerror", lambda error: errors.append(str(error)))
             page.goto(URL)
-            page.wait_for_function("document.querySelector('#sideCal').textContent.includes('известные')")
+            page.wait_for_function("document.querySelector('#calStatus').textContent.includes('известные')")
             # Удаляются только результаты предыдущего запуска этой QA-базы.
-            assert page.request.get(URL + "/api/ping").json()["version"] == "0.7.0"
+            assert page.request.get(URL + "/api/ping").json()["version"] == "0.8.0"
             for template in page.request.get(URL + "/api/state").json()["gesture_system"]["templates"]:
                 page.request.delete(URL + "/api/gestures/" + template["id"])
             prior_event = page.request.get(URL + "/api/state").json()["gesture_system"]["triggered"]
@@ -39,14 +39,16 @@ def main():
             page.wait_for_timeout(1000)  # реальная анимация/фильтр, не тест временных порогов
             name = f"Поза {width}"
             page.once("dialog", lambda dialog: dialog.accept(name))
+            page.locator('.tab[data-tab="gestures"]').click()
             page.locator("#createGesture").click()
             page.wait_for_function("name => document.querySelector('#gestureList strong')?.textContent === name", arg=name)
             page.wait_for_function("name => document.querySelector('#gestureWords').textContent === name", arg=name)
+            page.locator('.tab[data-tab="hand"]').click()
             page.screenshot(path=str(OUT / f"hand-{width}.png"))
             template = page.request.get(URL + "/api/state").json()["gesture_system"]["templates"][0]
             assert len(template["reference"]) == 5
             assert template["audio"] is None
-            page.locator('a[href="#settings"]').first.click()
+            page.locator('a[href="#gestures"]').first.click()
             page.wait_for_function("document.querySelector('#gestureList').textContent.includes('Аудио не назначено')")
             assert page.locator("#bindGrid").count() == 0
             assert page.locator("input[data-role]").count() == 0
@@ -63,7 +65,7 @@ def main():
             page.request.post(URL + "/api/mock", data={"bends": [.1] * 5})
             page.wait_for_timeout(1100)
             page.request.post(URL + "/api/mock", data={"bends": [.1, .8, .8, .1, .1]})
-            page.wait_for_function("document.querySelector('#mainTarget').textContent.includes('Сработал')")
+            page.wait_for_function("document.querySelector('#gestureReason').textContent.includes('Для повтора')")
             state = page.request.get(URL + "/api/state").json()
             assert state["gesture_system"]["triggered"]["gesture_id"] == template["id"]
             assert state["audio"]["results"][0]["status"] == "unavailable"

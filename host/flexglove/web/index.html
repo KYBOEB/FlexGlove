@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>FlexGlove — перчатка-интерфейс</title>
+  <title>FlexGlove</title>
   <!-- __V__ сервер заменяет на версию приложения: новая версия — новые адреса файлов, кэш браузера не мешает -->
   <link rel="icon" href="/static/icon.png?v=__V__">
   <link rel="stylesheet" href="/static/style.css?v=__V__">
@@ -24,6 +24,7 @@
   <div class="brand"><img src="/static/icon.png?v=__V__" alt="" class="logo"> FlexGlove <span class="ver" id="ver"></span></div>
   <nav class="tabs">
     <a href="#hand" data-tab="hand" class="tab">Рука</a>
+    <a href="#gestures" data-tab="gestures" class="tab">Жесты</a>
     <a href="#signals" data-tab="signals" class="tab">Сигналы</a>
     <a href="#settings" data-tab="settings" class="tab">Настройки</a>
   </nav>
@@ -41,100 +42,75 @@
         </div>
         <div class="banner warn" id="streamWarn" hidden></div>
       </div>
-      <div class="stage-pose" id="stagePose"></div>
 
       <div class="demo-bar" id="demoStrip" hidden>
         <b>Демо</b>
         <label class="check"><input type="checkbox" id="mockTour"> обзор</label>
         <label class="check"><input type="checkbox" id="mockAuto"> перебор жестов</label>
-        <span class="demo-sl"><span>наклон пальцев</span><input type="range" id="pitchSlider" min="-90" max="90" value="90"><b id="pitchVal">+90°</b></span>
-        <span class="demo-sl"><span>крен</span><input type="range" id="rollSlider" min="-170" max="170" value="0"><b id="rollVal">0°</b></span>
-        <span class="demo-sl"><span>поворот</span><input type="range" id="yawSlider" min="-90" max="90" value="0"><b id="yawVal">0°</b></span>
-        <span class="demo-sl"><span>сжатие</span><input type="range" id="gripSlider" min="0" max="100" value="0"></span>
-        <span class="muted small">клавиши 1–5 — пальцы, стрелки — кисть</span>
+        <span class="demo-sl"><label for="pitchSlider">наклон пальцев</label><input type="range" id="pitchSlider" min="-90" max="90" value="90"><b id="pitchVal">+90°</b></span>
+        <span class="demo-sl"><label for="rollSlider">крен</label><input type="range" id="rollSlider" min="-170" max="170" value="0"><b id="rollVal">0°</b></span>
+        <span class="demo-sl"><label for="yawSlider">поворот</label><input type="range" id="yawSlider" min="-90" max="90" value="0"><b id="yawVal">0°</b></span>
+        <span class="demo-sl"><label for="gripSlider">сжатие</label><input type="range" id="gripSlider" min="0" max="100" value="0"></span>
+        <span class="muted small">1–5: пальцы; стрелки: кисть</span>
       </div>
     </div>
 
     <aside class="side">
       <div class="side-block">
         <div class="side-row"><span class="dot" id="sideDot"></span><b id="sideSrc">Не подключено</b></div>
-        <div class="small muted" id="sideImu"></div>
         <div class="small cal-status warn" id="sideErrors" role="status" hidden></div>
-        <div class="small" id="sideCal"></div>
       </div>
 
       <div class="side-block gesture-block">
-        <svg id="gestureMini" class="mini-hand"></svg>
-        <div>
-          <div class="small muted">Жест</div>
-          <div class="gesture-words" id="gestureWords">—</div>
-          <div class="gesture-target" id="mainTarget"></div>
-          <progress id="gestureProgress" max="1" value="0" aria-label="Удержание жеста"></progress>
-          <div class="small" id="gestureReason" role="status"></div>
-        </div>
-      </div>
-
-      <div class="side-block">
-        <button id="createGesture">Создать жест</button>
-        <button class="ghost small" id="stopAudioMain">Остановить аудио</button>
-        <a href="#settings">Настроить жесты и аудиофразы</a>
-        <div class="small" id="audioStatus" role="status"></div>
-      </div>
-
-      <div class="side-block">
-        <div class="small muted">Пальцы</div>
-        <div class="fingers" id="fingerRows"></div>
-        <div class="small muted" id="fingerNote"></div>
-      </div>
-
-      <div class="side-block" id="imuBox" hidden>
-        <div class="small muted">Положение кисти (наклоны — по силе тяжести)</div>
-        <div class="imu-angles"><span>пальцы <b id="imuPitch">0°</b></span><span>крен <b id="imuRoll">0°</b></span><span>поворот <b id="imuYaw">0°</b></span></div>
-        <div class="small" id="imuStatus"></div>
+        <div class="gesture-words" id="gestureWords" role="status">Подключите источник</div>
+        <progress id="gestureProgress" max="1" value="0" aria-label="Удержание жеста" hidden></progress>
+        <div class="small" id="gestureReason" hidden></div>
       </div>
 
       <div class="side-buttons">
-        <button id="openWizard" title="Мастер: ладонь раскрыта 3 с → кулак 3 с → итог по каждому пальцу">Калибровка</button>
-        <button class="ghost" id="imuZero" title="Направьте пальцы на экран и нажмите: поворот вокруг вертикали станет нулевым. Наклоны не меняются — их задаёт сила тяжести">Обнулить поворот</button>
+        <button class="ghost" id="imuZero" title="Направьте пальцы на экран и нажмите: поворот вокруг вертикали станет нулевым. Наклоны задаёт сила тяжести">Обнулить поворот</button>
         <button class="ghost" id="viewReset" title="Вернуть камеру на исходное место (мышью вид можно вращать)">Вид по умолчанию</button>
-        <button class="ghost small" id="imuCal" title="2 с замера смещения гироскопа — держите руку неподвижно">Калибровать гироскоп</button>
       </div>
 
-      <details class="side-block log-block">
-        <summary class="small muted">Журнал</summary>
-        <ul class="log" id="eventLog"><li class="muted">Пока ничего не произошло</li></ul>
-      </details>
+
     </aside>
+  </section>
+
+  <section id="tab-gestures" class="page" hidden>
+      <div class="card wide" id="gestureSettings">
+        <div class="row between"><h2>Жесты</h2><button id="createGesture">Создать жест</button></div>
+        <div id="trainingStatus" role="status"></div>
+        <button id="cancelTraining" class="ghost small" hidden>Отменить обучение</button>
+        <p class="hint" id="audioFolder"></p>
+        <div id="gestureList" class="gesture-list"></div>
+        <div class="audio-controls"><h2>Воспроизведение</h2>
+        <button id="stopAudio" class="ghost">Остановить аудио и очистить очередь</button>
+        <div class="small" id="audioResult" role="status" hidden></div>
+        <div class="small" id="audioStatus" role="status" hidden></div></div>
+      </div>
+
   </section>
 
   <!-- ================= СИГНАЛЫ ================= -->
   <section id="tab-signals" class="page" hidden>
     <div class="sig-toolbar card">
       <div class="tool">
-        <span class="muted small">Калибровка</span>
+        <span class="muted small">Запись CSV</span>
         <div class="row">
-          <button id="calWizardBtn">Калибровка…</button>
-          <button class="ghost small" id="calReset" title="Забыть сохранённые уровни — снова автокалибровка">Сбросить</button>
-        </div>
-        <span class="small" id="calStatus"></span>
-      </div>
-      <div class="tool">
-        <span class="muted small">Запись в CSV (формат Excel, как у программы Захара)</span>
-        <div class="row">
-          <button id="recBtn">● Начать запись</button>
+          <button id="recBtn">Начать запись</button>
           <span class="small" id="recStatus"></span>
         </div>
         <div class="row">
           <button class="ghost small" id="protoBtn" title="5 с покой → 5 × (сгиб 2 с / разгиб 2 с) → 5 с покой; подсказки на экране">Запись по протоколу (30 с)</button>
-          <select id="protoCh" title="Какой палец сгибать"></select>
+          <label for="protoCh">Палец для записи</label><select id="protoCh" title="Какой палец сгибать"></select>
         </div>
       </div>
       <div class="tool">
         <span class="muted small">Воспроизвести запись</span>
         <div class="row">
-          <label class="file-btn">Открыть CSV…<input type="file" id="replayFile" accept=".csv,.txt" hidden></label>
-          <select id="recList"><option value="">— записи приложения —</option></select>
-          <button class="ghost small" id="recPlay">▶</button>
+          <label class="file-btn">Открыть CSV…<input type="file" id="replayFile" accept=".csv,.txt"></label>
+          <label for="recList">Сохранённая запись</label><select id="recList"><option value="">Не выбрана</option></select>
+          <button class="ghost small" id="recPlay">Воспроизвести</button>
           <a class="small" id="recDownload" href="#" hidden>скачать</a>
         </div>
       </div>
@@ -145,11 +121,11 @@
         <h2>Каналы <span class="pill" id="motionPill">покой</span></h2>
         <div class="row">
           <div class="segmented" id="chartMode">
-            <button data-mode="bend" class="active" title="Сгиб 0–100 % — одна шкала для всех пальцев">Сгиб, %</button>
+            <button data-mode="bend" class="active" title="Сгиб 0–100 %, общая шкала">Сгиб, %</button>
             <button data-mode="raw" title="Значения АЦП: шкала от уровня «ладонь» до «кулак» с запасом">Сырые АЦП</button>
           </div>
           <label class="check" id="showRawLabel" hidden><input type="checkbox" id="showRaw" checked> до фильтра</label>
-          <select id="chartSpan"><option value="5">5 с</option><option value="10" selected>10 с</option><option value="30">30 с</option></select>
+          <label for="chartSpan">Период графика</label><select id="chartSpan"><option value="5">5 с</option><option value="10" selected>10 с</option><option value="30">30 с</option></select>
           <button class="ghost small" id="chartPause">Пауза</button>
         </div>
       </div>
@@ -160,45 +136,37 @@
       </table>
       <p class="hint" id="sigHint"></p>
     </div>
-  </section>
+      <details class="card wide advanced">
+        <summary><h2>Обработка</h2></summary>
+        <div class="pipe-card">
+          <p class="small" id="pipeCurrent"></p>
+          <div class="row">
+            <label for="pipePreset">Пресет</label><select id="pipePreset"></select>
+            <button class="ghost small" id="pipeApply" hidden>Применить</button>
+            <span class="small" id="pipeHint"></span>
+          </div>
+          <div id="pipeCustom" hidden>
+            <label for="pipeJson">Блоки обработки (JSON)</label><textarea id="pipeJson" rows="4" spellcheck="false"></textarea>
+            <p class="hint">Список блоков по порядку. Фильтры: <span id="pipeTypes"></span>. Пример:
+              <code>[{"type":"hampel","n":7},{"type":"one_euro","min_cutoff":0.7,"beta":0.02}]</code>.
+</p>
+          </div>
+        </div>
+      </details>
+<div class="signal-details">
+      <div class="side-block">
+        <div class="small muted">Пальцы</div>
+        <div class="fingers" id="fingerRows"></div>
+        <div class="small muted" id="fingerNote"></div>
+      </div>
 
-  <!-- ================= НАСТРОЙКИ ================= -->
-  <section id="tab-settings" class="page" hidden>
-    <div class="settings-grid">
-      <div class="card">
-        <h2>1. Подключение</h2>
-        <div class="segmented" id="srcKind">
-          <button data-kind="ble" class="active">Bluetooth LE</button>
-          <button data-kind="serial">Порт (USB / BT Classic)</button>
-          <button data-kind="mock">Демо</button>
-        </div>
-        <div class="src-panel" data-panel="ble">
-          <p class="hint">ESP32-S3 работает только по BLE. Включите Bluetooth на компьютере, нажмите «Найти», выберите перчатку. Сопрягать в настройках Windows не нужно.</p>
-          <button id="bleScan">Найти устройства</button>
-          <label class="check"><input type="checkbox" id="bleOnlyNamed" checked> только с именем</label>
-          <ul class="devlist" id="bleList"></ul>
-        </div>
-        <div class="src-panel" data-panel="serial" hidden>
-          <p class="hint">USB-кабель или Bluetooth Classic (BluetoothSerial на обычном ESP32). Windows: после сопряжения появятся COM-порты «Стандартный последовательный порт по Bluetooth» — берите исходящий.</p>
-          <div class="row">
-            <select id="serialPort"><option value="">— порт —</option></select>
-            <select id="serialBaud"><option>9600</option><option selected>115200</option><option>230400</option><option>460800</option><option>921600</option></select>
-            <button class="ghost" id="serialRefresh">Обновить</button>
-            <button id="serialConnect">Подключить</button>
-          </div>
-        </div>
-        <div class="src-panel" data-panel="mock" hidden>
-          <p class="hint">Имитация перчатки (сигнал похож на реальный: АЦП ≈ 213 в покое, шум, выбросы, 50 Гц) и MPU6050.</p>
-          <div class="row">
-            <select id="mockN"><option value="2">2 сенсора — как прототип</option><option value="5" selected>5 сенсоров</option></select>
-            <button id="mockStart">Включить демо</button>
-          </div>
-        </div>
-        <div class="status-box">
-          <div><span class="dot" id="srcDot"></span> <b id="srcName">Не подключено</b></div>
-          <div class="muted" id="srcMsg"></div>
-          <button class="ghost small" id="disconnectBtn">Отключить</button>
-        </div>
+      <div class="side-block" id="imuBox" hidden>
+        <h2>Положение кисти</h2>
+        <div class="small muted" id="sideImu"></div>
+        <div class="imu-angles"><span>пальцы <b id="imuPitch">0°</b></span><span>крен <b id="imuRoll">0°</b></span><span>поворот <b id="imuYaw">0°</b></span></div>
+        <div class="small" id="imuStatus"></div>
+      </div>
+
         <details class="debug">
           <summary>Отладка потока</summary>
           <table>
@@ -212,57 +180,82 @@
             <tr><td>Предупреждения</td><td id="dbgWarn">нет</td></tr>
           </table>
         </details>
+      <details class="side-block log-block">
+        <summary class="small muted">Журнал</summary>
+        <ul class="log" id="eventLog"><li class="muted">Пока ничего не произошло</li></ul>
+      </details>
+    </div>
+  </section>
+
+  <!-- ================= НАСТРОЙКИ ================= -->
+  <section id="tab-settings" class="page" hidden>
+    <div class="settings-grid">
+      <div class="settings-left">
+      <div class="card">
+        <h2>Подключение</h2>
+        <div class="segmented" id="srcKind">
+          <button data-kind="ble" class="active">Bluetooth LE</button>
+          <button data-kind="serial">Порт (USB / BT Classic)</button>
+          <button data-kind="mock">Демо</button>
+        </div>
+        <div class="src-panel" data-panel="ble">
+          <p class="hint">ESP32-S3 работает только по BLE. Включите Bluetooth на компьютере, нажмите «Найти», выберите перчатку. Сопрягать в настройках Windows не нужно.</p>
+          <button id="bleScan">Найти устройства</button>
+          <label class="check"><input type="checkbox" id="bleOnlyNamed" checked> только с именем</label>
+          <ul class="devlist" id="bleList"></ul>
+        </div>
+        <div class="src-panel" data-panel="serial" hidden>
+          <p class="hint">USB-кабель или Bluetooth Classic (BluetoothSerial на обычном ESP32). Windows: после сопряжения появятся COM-порты «Стандартный последовательный порт по Bluetooth». Выберите исходящий порт.</p>
+          <div class="row">
+            <label for="serialPort">Порт</label><select id="serialPort"><option value="">Не выбран</option></select>
+            <label for="serialBaud">Скорость, бод</label><select id="serialBaud"><option>9600</option><option selected>115200</option><option>230400</option><option>460800</option><option>921600</option></select>
+            <button class="ghost" id="serialRefresh">Обновить</button>
+            <button id="serialConnect">Подключить</button>
+          </div>
+        </div>
+        <div class="src-panel" data-panel="mock" hidden>
+
+          <div class="row">
+            <label for="mockN">Сенсоры</label><select id="mockN"><option value="2">2 сенсора (прототип)</option><option value="5" selected>5 сенсоров</option></select>
+            <button id="mockStart">Включить демо</button>
+          </div>
+        </div>
+        <div class="status-box">
+          <div><span class="dot" id="srcDot"></span> <b id="srcName">Не подключено</b></div>
+          <div class="muted" id="srcMsg"></div>
+          <button class="ghost small" id="disconnectBtn">Отключить</button>
+        </div>
+
+      </div>
+
+      <div class="card calibration-card">
+      <div class="tool">
+        <h2>Калибровка</h2>
+        <div class="row">
+          <button id="calWizardBtn">Начать калибровку</button>
+          <button class="ghost small" id="calReset" title="Удалить сохранённые уровни и включить автокалибровку">Сбросить</button>
+        </div>
+        <span class="small" id="calStatus"></span>
+      </div>
+        <button class="ghost" id="imuCal" title="2 с замера смещения гироскопа: держите руку неподвижно">Калибровать гироскоп</button>
+      </div>
       </div>
 
       <div class="card">
-        <h2>2. Каналы и пальцы</h2>
+        <h2>Каналы и пальцы</h2>
         <div class="hand-wrap"><svg id="handSettings" class="hand"></svg></div>
         <p class="hint">Укажите, какой палец измеряет каждый канал. Жесты используют только измеренные каналы.
           После изменения соответствия потребуется повторное обучение.</p>
         <div id="fingerMap" class="finger-map"></div>
-        <div class="row"><span>Рука</span>
+        <div class="row"><label for="handSide">Рука</label>
           <select id="handSide"><option value="right">правая</option><option value="left">левая</option></select></div>
-        <div class="row"><span>MPU6050 закреплён</span><select id="imuMount"></select></div>
-        <p class="hint">Оси руки: X — к пальцам, Z — от тыльной стороны кисти. Выберите, куда смотрит ось X модуля
-          (стрелка на плате) и какой стороной он приклеен; по умолчанию X — к пальцам, лицом от кожи.</p>
+        <div class="row"><label for="imuMount">MPU6050 закреплён</label><select id="imuMount"></select></div>
+        <p class="hint">Оси руки: X к пальцам, Z от тыльной стороны кисти. Выберите, куда смотрит ось X модуля
+          (стрелка на плате) и какой стороной он приклеен; по умолчанию X к пальцам, лицом от кожи.</p>
       </div>
 
-      <div class="card wide" id="gestureSettings">
-        <div class="row between"><h2>3. Обучаемые жесты → аудиофразы</h2><button id="createGestureSettings">Создать жест</button></div>
-        <p class="hint">Покажите позу, введите название и держите пальцы неподвижно около секунды.
-          Назначьте свой MP3. После обучения выйдите из позы и покажите её снова: 700 мс устойчивого совпадения → одна фраза.
-          Для повтора нужен выход на 350 мс. Можно сразу перейти к другому жесту.</p>
-        <p class="hint" id="gestureProfile"></p>
-        <div id="trainingStatus" role="status"></div>
-        <button id="cancelTraining" class="ghost small" hidden>Отменить обучение</button>
-        <p class="hint" id="audioFolder"></p>
-        <p class="hint">Добавьте три своих MP3 в указанную папку. Звук играет на компьютере с Python.
-          Старые настройки ARM/hold/light сохранены отдельно и не выполняются.</p>
-        <div id="gestureList" class="gesture-list"></div>
-        <button id="stopAudio" class="ghost">Остановить аудио и очистить очередь</button>
-        <div class="small" id="audioResult" role="status"></div>
-      </div>
 
-      <details class="card wide advanced">
-        <summary><h2>4. Дополнительно</h2></summary>
-        <div class="pipe-card">
-          <div class="row between">
-            <h3>Фильтрация сигнала</h3>
-            <span class="small muted">графики и сгиб считаются по выходу выбранного конвейера; по умолчанию — «Базовый» (D-23)</span>
-          </div>
-          <div class="row">
-            <select id="pipePreset"></select>
-            <button class="ghost small" id="pipeApply" hidden>Применить</button>
-            <span class="small" id="pipeHint"></span>
-          </div>
-          <div id="pipeCustom" hidden>
-            <textarea id="pipeJson" rows="4" spellcheck="false"></textarea>
-            <p class="hint">Список блоков по порядку. Фильтры: <span id="pipeTypes"></span>. Пример:
-              <code>[{"type":"hampel","n":7},{"type":"one_euro","min_cutoff":0.7,"beta":0.02}]</code>.
-              Как сравнить конвейеры на записи — <code>python tools/evaluate.py запись.csv --compare one_euro свой.json</code>.</p>
-          </div>
-        </div>
-      </details>
+
     </div>
   </section>
 </main>

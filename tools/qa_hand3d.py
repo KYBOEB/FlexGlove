@@ -57,7 +57,7 @@ with sync_playwright() as p:
    snapshot(page, f'{"before" if before else "after"}-{width}.png')
    if before:
     page.close(); continue
-   assert page.locator('#sideCal').inner_text().startswith('✓ Демо:')
+   assert page.locator('#calStatus').inner_text().startswith('Демо:')
    assert page.locator('#connDot').count()==0
    for fallback in [False,True]:
     if fallback:
