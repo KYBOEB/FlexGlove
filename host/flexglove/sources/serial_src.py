@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import asyncio
 import threading
+from functools import partial
 
 import serial
 from serial.tools import list_ports
@@ -34,6 +35,7 @@ class SerialSource(Source):
         self._ser: serial.Serial | None = None
 
     async def start(self) -> None:
+        self._stop.clear()
         self._loop = asyncio.get_running_loop()
         self.on_status(kind=self.kind, name=self.port, connected=False, message=f"Открываю {self.port}…")
         # открываем порт в отдельном потоке, чтобы не блокировать сервер
@@ -47,25 +49,40 @@ class SerialSource(Source):
         buf = b""
         try:
             while not self._stop.is_set():
-                chunk = self._ser.read(256)
+                # Ждём только первый байт; остаток читаем без ожидания наполнения.
+                # На пустом порту read(1) блокируется до timeout, не занимая CPU.
+                chunk = self._ser.read(max(1, min(256, self._ser.in_waiting)))
+                if self._stop.is_set():
+                    break
                 if not chunk:
                     continue
                 buf += chunk
                 while b"\n" in buf:
                     line, buf = buf.split(b"\n", 1)
-                    self._loop.call_soon_threadsafe(self.on_raw, line + b"\n")
+                    self._loop.call_soon_threadsafe(self._deliver, line + b"\n")
                 if len(buf) > 4096:  # устройство шлёт без перевода строки — отдаём как есть
-                    self._loop.call_soon_threadsafe(self.on_raw, buf)
+                    self._loop.call_soon_threadsafe(self._deliver, buf)
                     buf = b""
         except (serial.SerialException, OSError) as exc:
-            self._loop.call_soon_threadsafe(
-                lambda: self.on_status(kind=self.kind, name=self.port, connected=False, message=f"Порт закрыт: {exc}")
-            )
+            if not self._stop.is_set():
+                # exc очищается Python при выходе из except: сохраняем текст сейчас.
+                self._loop.call_soon_threadsafe(partial(self._report_error, f"Порт закрыт: {exc}"))
+        finally:
+            self._ser.close()
+
+    def _deliver(self, data: bytes) -> None:
+        if not self._stop.is_set():
+            self.on_raw(data)
+
+    def _report_error(self, message: str) -> None:
+        if not self._stop.is_set():
+            self.on_status(kind=self.kind, name=self.port, connected=False, message=message)
 
     async def stop(self) -> None:
         self._stop.set()
         if self._thread:
-            await asyncio.to_thread(self._thread.join, 1.0)
-        if self._ser:
+            # read ограничен timeout=0.2; ждём завершения до смены источника.
+            await asyncio.to_thread(self._thread.join)
+        elif self._ser:
             await asyncio.to_thread(self._ser.close)
         self.on_status(kind=None, name=None, connected=False, message="Не подключено")
