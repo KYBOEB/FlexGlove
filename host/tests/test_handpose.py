@@ -3,6 +3,7 @@
 Пределы проверяются всегда (по тексту модуля); сами функции — через Node.js, если он установлен
 (на компьютере без Node проверка функций пропускается, на сервере CI Node есть)."""
 import json
+import os
 import re
 import shutil
 import subprocess
@@ -31,8 +32,11 @@ def test_limits_match_anatomy():
     assert 0 < t["metacarpalAcross"] <= 45 and 0 < t["metacarpalOppose"] <= 45
 
 
-@pytest.mark.skipif(shutil.which("node") is None, reason="нет Node.js — функции handpose.js не проверить")
 def test_joint_angles_monotonic_and_bounded():
+    if shutil.which("node") is None:
+        if os.environ.get("CI"):
+            pytest.fail("В CI требуется Node.js для проверки handpose.js")
+        pytest.skip("нет Node.js — функции handpose.js не проверить")
     script = f"""
       import {{ jointAngles, LIMITS, bendWord }} from {json.dumps((WEB / 'handpose.js').as_uri())};
       const out = {{}};
@@ -45,7 +49,8 @@ def test_joint_angles_monotonic_and_bounded():
       out.words = [0, 0.3, 0.9].map(bendWord);
       console.log(JSON.stringify(out));
     """
-    res = subprocess.run(["node", "--input-type=module", "-e", script], capture_output=True, text=True, timeout=30)
+    res = subprocess.run(["node", "--input-type=module", "-e", script],
+                         capture_output=True, text=True, encoding="utf-8", timeout=30)
     assert res.returncode == 0, res.stderr
     data = json.loads(res.stdout)
     lim = data["limits"]
