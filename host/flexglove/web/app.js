@@ -76,23 +76,37 @@
   window.addEventListener("hashchange", showTab);
 
   // ---------------- WebSocket ----------------
-  function connectWS() {
-    const ws = new WebSocket(`ws://${location.host}/ws`);
-    ws.onmessage = (e) => { S = JSON.parse(e.data); render(); };
-    ws.onclose = () => {
-      $("#connDot").className = "dot"; $("#connText").textContent = "Нет связи с приложением — переподключаюсь…";
-      setTimeout(connectWS, 1000);
-    };
+  let wsLive = false, lastSnapshot = 0, activeWS = null;
+  function connectionLost() {
+    wsLive = false;
+    $("#sideDot").className = "dot";
+    $("#sideSrc").textContent = "Нет связи с приложением — переподключаюсь…";
+    $("#sideImu").textContent = "Данные IMU устарели";
+    $("#sideErrors").textContent = "Поток состояния недоступен";
+    $("#sideErrors").hidden = false;
+    $("#srcDot").className = "dot";
+    $("#srcName").textContent = "Нет связи с приложением";
+    $("#demoStrip").hidden = true;
   }
+  function connectWS() {
+    const ws = new WebSocket(`${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/ws`);
+    activeWS = ws;
+    ws.onmessage = (e) => { S = JSON.parse(e.data); wsLive = true; lastSnapshot = performance.now(); render(); };
+    ws.onerror = connectionLost;
+    ws.onclose = () => { connectionLost(); setTimeout(connectWS, 1000); };
+  }
+  setInterval(() => {
+    if (wsLive && performance.now() - lastSnapshot > 2500) {
+      connectionLost();
+      activeWS?.close();                              // onclose запускает переподключение
+    }
+  }, 500);
 
   // ---------------- отрисовка ----------------
   function render() {
-    const src = S.source || {}, connected = !!src.connected, n = S.n_channels, map = S.finger_map;
+    const src = S.source || {}, connected = wsLive && !!src.connected, n = S.n_channels, map = S.finger_map;
     const chans = S.channels || [];
 
-    $("#connDot").className = "dot" + (connected ? " ok" : src.kind ? " wait" : "");
-    $("#connText").textContent = connected ? `${src.name || "Устройство"} подключено` : (src.message || "Не подключено");
-    $("#connRate").textContent = connected ? `${S.stats.rate} сообщ./с` : "";
     $("#noDeviceBanner").hidden = connected;
     const warns = S.warnings || [];
     const wbox = $("#streamWarn");
@@ -154,6 +168,7 @@
 
   /** Статус калибровки для главного экрана и «Сигналов». */
   function calibrationStatus(chans) {
+    if (S.source?.kind === "mock") return { cls: "ok", text: "✓ Демо: известные диапазоны генератора" };
     const live = chans.filter((c) => !c.stale && c.mode !== "bits");
     if (!live.length) return { cls: "", text: S.mode === "bits" ? "Перчатка присылает готовые 0/1 — калибровка не нужна" : "" };
     const cal = live.filter((c) => c.mode === "calibrated").length;
@@ -168,6 +183,10 @@
     $("#sideImu").textContent = !connected ? "" : !ori ? "Без датчика ориентации — рука показана пальцами вверх"
       : ori.calibrating ? "⏳ Калибровка гироскопа: держите руку неподвижно 2 с"
       : ori.stale ? "Нет данных MPU6050" : `MPU6050: ${ori.bias_ok ? "гироскоп откалиброван" : "гироскоп калибруется в покое"} · ${ori.at_rest ? "покой" : "движение"}`;
+    const errors = [...(S.warnings || [])];
+    if (S.stats.unparsed) errors.push(`Ошибки разбора: ${S.stats.unparsed}`);
+    $("#sideErrors").textContent = errors.join(" · ");
+    $("#sideErrors").hidden = !errors.length;
     const cs = calibrationStatus(chans);
     const sc = $("#sideCal"); sc.textContent = cs.text; sc.className = "small cal-status " + cs.cls;
 
@@ -266,10 +285,11 @@
     btn.textContent = r.active ? "■ Остановить запись" : "● Начать запись";
     btn.classList.toggle("rec-on", r.active);
     $("#recStatus").textContent = r.active ? `${r.file} · строк: ${r.rows}` : (r.file ? `последняя: ${r.file}` : "");
-    const calOk = S.mode === "values";
+    const calOk = S.mode === "values" && S.source?.kind !== "mock";
+    $("#calReset").disabled = S.source?.kind === "mock";
     $("#calWizardBtn").disabled = $("#openWizard").disabled = !calOk;
     const cs = calibrationStatus(S.channels || []);
-    $("#calStatus").textContent = calOk ? cs.text : "нужен поток значений АЦП";
+    $("#calStatus").textContent = S.source?.kind === "mock" || calOk ? cs.text : "нужен поток значений АЦП";
   }
 
   function renderFingerMap(n, map, roles) {

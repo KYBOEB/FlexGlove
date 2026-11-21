@@ -150,30 +150,27 @@ def wait(c, cond, timeout=6.0):
     raise AssertionError("не дождались состояния")
 
 
-def test_wizard_api_in_demo(tmp_path):
-    with TestClient(create_app(tmp_path / "t.db", demo=True)) as c:
-        wait(c, lambda s: s["mode"] == "values" and s["n_channels"] == 5)
-        assert c.post("/api/calibration/wizard/fist").status_code == 409        # сначала ладонь
-        c.post("/api/mock", json={"bends": [0, 0, 0, 0, 0]})
-        r = c.post("/api/calibration/wizard/open?duration=0.6")
-        assert r.status_code == 200 and r.json()["capturing"] == "open"
-        st = wait(c, lambda s: s["wizard"]["step"] == "open_done")
-        assert st["wizard"]["capturing"] is None
-        c.post("/api/mock", json={"bends": [1, 1, 1, 1, 0]})                    # мизинец «не работает»
-        time.sleep(0.5)
+def test_wizard_api_real_stream(tmp_path):
+    app = create_app(tmp_path / "t.db")
+    with TestClient(app) as c:
+        engine = app.state.flex.engine
+        engine.on_source_status(kind="serial", connected=True)
+        def feed(values):
+            for _ in range(80):
+                engine.on_raw(";".join(map(str, values)))
+        feed([200] * 5)
+        assert c.post("/api/calibration/wizard/fist").status_code == 409
+        assert c.post("/api/calibration/wizard/open?duration=0.6").status_code == 200
+        feed([200] * 5)
+        wait(c, lambda s: s["wizard"]["step"] == "open_done")
+        feed([900, 900, 900, 900, 200])
         c.post("/api/calibration/wizard/fist?duration=0.6")
+        feed([900, 900, 900, 900, 200])
         st = wait(c, lambda s: s["wizard"]["step"] == "review")
-        rows = st["wizard"]["summary"]
-        assert len(rows) == 5
-        assert [r["grade"] for r in rows[:4]] == ["good"] * 4 and rows[4]["grade"] == "flat"
-        assert rows[1]["span"] > 500 and 0 < rows[1]["noise"] < 8
-        # до «Сохранить» калибровка не записана
-        assert all(ch["cal"]["open"] is None for ch in st["channels"])
+        assert [r["grade"] for r in st["wizard"]["summary"]] == ["good"] * 4 + ["flat"]
         assert c.post("/api/calibration/wizard-save").json()["valid_channels"] == 4
-        st = c.get("/api/state").json()
-        assert st["wizard"]["step"] == "idle"
-        assert [ch["mode"] for ch in st["channels"][:4]] == ["calibrated"] * 4
-        assert c.post("/api/calibration/wizard-save").status_code == 409        # нечего сохранять
+        assert engine.storage.get("calibration")["open"] == [200] * 5
+        assert c.post("/api/calibration/wizard-save").status_code == 409
 
 
 def test_wizard_needs_value_stream(tmp_path):

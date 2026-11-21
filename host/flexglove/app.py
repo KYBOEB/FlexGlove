@@ -270,7 +270,10 @@ def create_app(db_path: Path | str = DEFAULT_DB, demo: bool = False) -> FastAPI:
 
     @app.delete("/api/calibration")
     async def reset_calibration():
-        engine.reset_calibration()
+        try:
+            engine.reset_calibration()
+        except RuntimeError as exc:
+            raise HTTPException(409, str(exc)) from exc
         return {}
 
     # ---------- запись ----------

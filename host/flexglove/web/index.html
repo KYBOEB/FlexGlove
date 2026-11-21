@@ -27,11 +27,6 @@
     <a href="#signals" data-tab="signals" class="tab">Сигналы</a>
     <a href="#settings" data-tab="settings" class="tab">Настройки</a>
   </nav>
-  <div class="conn">
-    <span class="dot" id="connDot"></span>
-    <span id="connText">Нет связи с приложением</span>
-    <span class="rate" id="connRate"></span>
-  </div>
 </header>
 
 <main>
@@ -64,6 +59,7 @@
       <div class="side-block">
         <div class="side-row"><span class="dot" id="sideDot"></span><b id="sideSrc">Не подключено</b></div>
         <div class="small muted" id="sideImu"></div>
+        <div class="small cal-status warn" id="sideErrors" role="status" hidden></div>
         <div class="small" id="sideCal"></div>
       </div>
 

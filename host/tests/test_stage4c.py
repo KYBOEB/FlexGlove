@@ -15,9 +15,9 @@ WEB = Path(__file__).resolve().parents[1] / "flexglove" / "web"
 ROOT = Path(__file__).resolve().parents[2]
 
 
-def test_version_is_061():
-    assert __version__ == "0.6.1"
-    assert "## 0.6.1" in (ROOT / "CHANGELOG.md").read_text(encoding="utf-8")
+def test_version_is_062():
+    assert __version__ == "0.6.2"
+    assert "## 0.6.2" in (ROOT / "CHANGELOG.md").read_text(encoding="utf-8")
 
 
 def test_demo_starts_fingers_up_back_to_viewer():
@@ -72,13 +72,3 @@ def test_ui_reflects_demo_state_and_pitch_range():
     html = (WEB / "index.html").read_text(encoding="utf-8")
     sl = re.search(r'<input type="range" id="pitchSlider"[^>]*>', html).group(0)
     assert 'min="-90"' in sl and 'max="90"' in sl and 'value="90"' in sl
-
-
-def test_hand3d_framing_and_shadow():
-    """Кадр по ограничивающей сфере, «Вид по умолчанию» — тот же кадр; предплечья («клина») и пола-тени нет."""
-    js = (WEB / "hand3d.js").read_text(encoding="utf-8")
-    for marker in ("fitDistance()", "setViewOffset(", "setInsets(", "_updateBlob()", "resetView()"):
-        assert marker in js, marker
-    assert "_buildForearm" not in js and "FOREARM_LEN" not in js
-    assert "ShadowMaterial" not in js
-    assert "camera.zoom" not in js

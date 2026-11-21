@@ -41,3 +41,11 @@ def test_es_modules_served_with_javascript_mime(tmp_path):
     assert 'from "three"' in (WEB / "hand3d.js").read_text(encoding="utf-8")
     assert "MIT" in (WEB / "vendor" / "three" / "LICENSE").read_text(encoding="utf-8")
     assert "MIT" in (WEB / "vendor" / "models" / "generic-hand" / "LICENSE.md").read_text(encoding="utf-8")
+
+
+def test_direct_id_references_exist():
+    """После удаления блоков не должно оставаться обращений к отсутствующим DOM-узлам."""
+    js = (WEB / "app.js").read_text(encoding="utf-8")
+    html = (WEB / "index.html").read_text(encoding="utf-8")
+    ids = set(re.findall(r'\$\("#([\w-]+)"\)', js))
+    assert not [i for i in ids if f'id="{i}"' not in html]
