@@ -34,8 +34,6 @@ a { color: var(--accent); }
 .tabs { display: flex; gap: 4px; }
 .tab { padding: 8px 14px; border-radius: 10px; text-decoration: none; color: var(--muted); font-weight: 600; }
 .tab.active { background: var(--accent-soft); color: var(--accent); }
-.conn { margin-left: auto; display: flex; align-items: center; gap: 8px; font-size: 14px; }
-.rate { color: var(--muted); font-size: 12px; }
 .dot { width: 10px; height: 10px; border-radius: 50%; background: var(--bad); display: inline-block; flex: none; }
 .dot.ok { background: var(--ok); box-shadow: 0 0 0 4px #1f9d5522; }
 .dot.wait { background: var(--warn); }

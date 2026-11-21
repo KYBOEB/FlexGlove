@@ -27,6 +27,7 @@ from .imu import DEFAULT_MOUNT, MOUNT_PRESETS, ImuTracker
 from .processing import CalibrationCapture, ChannelProcessor
 from .recording import Recorder
 from .storage import Storage
+from .sources.mock import REST, BEND_DELTA
 
 FINGERS = ["thumb", "index", "middle", "ring", "pinky"]
 DEFAULT_FINGER_MAP = ["thumb", "index", "middle", "ring", "pinky"]  # канал i -> палец
@@ -182,11 +183,8 @@ class Engine:
     def _ensure_channels(self, n: int) -> None:
         while len(self.channels) < min(n, MAX_CHANNELS):
             ch = ChannelProcessor(self.pipeline_config)
-            cal = self.storage.get("calibration", {})
-            i = len(self.channels)
-            if i < len(cal.get("open", [])) and i < len(cal.get("fist", [])):
-                ch.cal.open, ch.cal.fist = cal["open"][i], cal["fist"][i]
             self.channels.append(ch)
+            self._load_calibration()
 
     def _update_channel(self, i: int, value: float, now: float) -> None:
         ch = self.channels[i]
@@ -203,11 +201,26 @@ class Engine:
 
     def on_source_status(self, **info: Any) -> None:
         was = self.source_info.get("connected")
+        previous_kind = self.source_info.get("kind")
         self.source_info.update(info)
         if self.source_info.get("connected") and not was:
             self.connected_since = time.monotonic()
-        if not self.source_info.get("connected"):
+        if not self.source_info.get("connected") or previous_kind != self.source_info.get("kind") or not was:
             self._set_mode("none")
+            self.capture = None
+            self.wizard.reset()
+            self.last_calibration = None
+            self.channels = []
+            self.tag_order = []
+            self.bits = ()
+            self.commands.reset()
+            self.segmenter.reset()
+            self._msg_times.clear()
+            self.msg_total = self.unparsed_total = self.imu_total = 0
+            self.last_data_time = self.imu_time = 0.0
+            self.last_raw = self.last_format = ""
+            self.grip = 0.0
+            self.controller.set_link(False)
             self.prefer_values = False
             self.imu = None
             self.imu_tracker.reset()
@@ -300,7 +313,12 @@ class Engine:
         self._dirty = True
 
     # ================= калибровка =================
+    def _require_real_calibration(self) -> None:
+        if self.source_info.get("kind") == "mock":
+            raise RuntimeError("В демо используются известные диапазоны генератора")
+
     def start_calibration(self, target: str, duration: float = 1.5) -> None:
+        self._require_real_calibration()
         if target not in ("open", "fist"):
             raise ValueError("target должен быть open или fist")
         if self.mode != "values" or not self.channels:
@@ -309,6 +327,7 @@ class Engine:
         self._dirty = True
 
     def _finish_calibration(self) -> None:
+        self._require_real_calibration()
         assert self.capture is not None
         target, result = self.capture.target, self.capture.result()
         self.capture = None
@@ -325,6 +344,7 @@ class Engine:
 
     # ---------- мастер калибровки ----------
     def wizard_start(self, target: str, duration: float | None = None) -> None:
+        self._require_real_calibration()
         if self.mode != "values" or not self.channels:
             raise RuntimeError("Калибровка возможна только при потоке значений АЦП — подключите перчатку")
         kw = {} if duration is None else {"duration": duration}
@@ -332,6 +352,7 @@ class Engine:
         self._dirty = True
 
     def wizard_save(self) -> dict:
+        self._require_real_calibration()
         opens, fists = self.wizard.levels()
         self.storage.put("calibration", {"open": opens, "fist": fists})
         self._load_calibration()
@@ -347,13 +368,16 @@ class Engine:
         self._dirty = True
 
     def _load_calibration(self) -> None:
-        cal = self.storage.get("calibration", {})
+        cal = ({"open": [REST[i % 5] for i in range(MAX_CHANNELS)],
+                "fist": [REST[i % 5] + BEND_DELTA[i % 5] for i in range(MAX_CHANNELS)]}
+               if self.source_info.get("kind") == "mock" else self.storage.get("calibration", {}))
         for i, ch in enumerate(self.channels):
             o, f = cal.get("open", []), cal.get("fist", [])
             ch.cal.open = o[i] if i < len(o) else None
             ch.cal.fist = f[i] if i < len(f) else None
 
     def reset_calibration(self) -> None:
+        self._require_real_calibration()
         self.storage.put("calibration", {"open": [], "fist": []})
         for ch in self.channels:
             ch.cal.open = ch.cal.fist = None
@@ -543,12 +567,16 @@ class Engine:
         self._subscribers.discard(q)
 
     async def _broadcast_loop(self) -> None:
+        last_broadcast = 0.0
         while True:
             await asyncio.sleep(1 / BROADCAST_HZ)
             if not self._subscribers:
                 continue
-            if not self._dirty and self.mode == "none":
+            now = time.monotonic()
+            # Даже без перчатки подтверждаем, что WebSocket и приложение живы.
+            if not self._dirty and self.mode == "none" and now - last_broadcast < 1.0:
                 continue
+            last_broadcast = now
             self._dirty = False
             snap = self.snapshot()
             for q in list(self._subscribers):
