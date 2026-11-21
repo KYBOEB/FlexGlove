@@ -1,0 +1,22 @@
+{
+  "run_url": "https://github.com/KYBOEB/FlexGlove/actions/runs/44926132206",
+  "implementation_commit": "fd8082f8fdeced0e1c39ca5db559698264595158",
+  "event": "push",
+  "windows": {
+    "conclusion": "success",
+    "passed": 290,
+    "skipped": 1
+  },
+  "ubuntu": {
+    "conclusion": "success",
+    "passed": 291,
+    "skipped": 0
+  },
+  "checks": [
+    "pytest",
+    "serial loopback",
+    "syntax app/chart/hand/handpose/hand3d",
+    "MP3 backend import",
+    "WinRT BLE import on Windows"
+  ]
+}

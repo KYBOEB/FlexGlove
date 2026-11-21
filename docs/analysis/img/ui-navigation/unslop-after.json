@@ -10,11 +10,11 @@
   "U6 status string": {
     "count": 5,
     "examples": [
-      "host/flexglove/web\\app.js:157",
-      "host/flexglove/web\\app.js:157",
-      "host/flexglove/web\\app.js:188",
-      "host/flexglove/web\\app.js:265",
-      "host/flexglove/web\\app.js:721"
+      "host/flexglove/web/app.js:157",
+      "host/flexglove/web/app.js:157",
+      "host/flexglove/web/app.js:188",
+      "host/flexglove/web/app.js:265",
+      "host/flexglove/web/app.js:721"
     ]
   },
   "U9 badge word": {
@@ -56,7 +56,7 @@
   "U17 gradient or glow": {
     "count": 1,
     "examples": [
-      "host/flexglove/web\\style.css:154"
+      "host/flexglove/web/style.css:154"
     ]
   },
   "U18 off-scale spacing": {

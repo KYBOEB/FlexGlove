@@ -1,6 +1,7 @@
 # Интерфейс FlexGlove v0.8.0: отчёт реализации
 
 Дата: 21.11.2026. Ветка: `stage-7-ui-navigation`, исходный `main`: `e20b73a`.
+PR: [#9](https://github.com/KYBOEB/FlexGlove/pull/9), без слияния.
 Рабочее дерево до изменений было чистым; `git fetch origin` выполнен перед созданием ветки.
 
 ## Перенос и очистка
@@ -79,7 +80,9 @@ Chromium на компьютере пользователя, размеры view
   Сами hand3d.js, handpose.js и IMU-алгоритмы не менялись.
 - SHA-256 **199 пользовательских файлов data/ и audio/ совпали** до и после сценария.
 - `git diff --check` и компиляция QA-скриптов прошли.
-- CI Windows/Ubuntu запускается для PR; результат будет зафиксирован ниже после завершения.
+- [CI Windows/Ubuntu](https://github.com/KYBOEB/FlexGlove/actions/runs/44926132206) на коммите реализации `fd8082f`: **success**.
+  Windows: **290 passed, 1 skipped**; Ubuntu: **291 passed**. Обе ОС прошли serial loopback,
+  проверку пяти JavaScript-модулей и импорт MP3 backend; Windows также прошла импорт WinRT BLE.
 
 Машинные результаты: [results.json](img/ui-navigation/results.json).
 Воспроизведение: `python tools/qa_ui_navigation.py --browser "путь-к-chrome.exe"`.

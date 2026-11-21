@@ -10,11 +10,11 @@
   "U6 status string": {
     "count": 7,
     "examples": [
-      "C:\\Users\\bimba\\AppData\\Local\\Packages\\openai.codex_2p2nqsd0c76g0\\AC\\#!sandbox.{209bd05a-0c8a-4edc-812b-522188ba8f71}\\Temp\\tmpfte3mlvj\\host\\flexglove\\web\\app.js:155",
-      "C:\\Users\\bimba\\AppData\\Local\\Packages\\openai.codex_2p2nqsd0c76g0\\AC\\#!sandbox.{209bd05a-0c8a-4edc-812b-522188ba8f71}\\Temp\\tmpfte3mlvj\\host\\flexglove\\web\\app.js:155",
-      "C:\\Users\\bimba\\AppData\\Local\\Packages\\openai.codex_2p2nqsd0c76g0\\AC\\#!sandbox.{209bd05a-0c8a-4edc-812b-522188ba8f71}\\Temp\\tmpfte3mlvj\\host\\flexglove\\web\\app.js:185",
-      "C:\\Users\\bimba\\AppData\\Local\\Packages\\openai.codex_2p2nqsd0c76g0\\AC\\#!sandbox.{209bd05a-0c8a-4edc-812b-522188ba8f71}\\Temp\\tmpfte3mlvj\\host\\flexglove\\web\\app.js:240",
-      "C:\\Users\\bimba\\AppData\\Local\\Packages\\openai.codex_2p2nqsd0c76g0\\AC\\#!sandbox.{209bd05a-0c8a-4edc-812b-522188ba8f71}\\Temp\\tmpfte3mlvj\\host\\flexglove\\web\\app.js:252"
+      "host/flexglove/web/app.js:155",
+      "host/flexglove/web/app.js:155",
+      "host/flexglove/web/app.js:185",
+      "host/flexglove/web/app.js:240",
+      "host/flexglove/web/app.js:252"
     ]
   },
   "U9 badge word": {
@@ -28,9 +28,9 @@
   "U11 emoji": {
     "count": 3,
     "examples": [
-      "C:\\Users\\bimba\\AppData\\Local\\Packages\\openai.codex_2p2nqsd0c76g0\\AC\\#!sandbox.{209bd05a-0c8a-4edc-812b-522188ba8f71}\\Temp\\tmpfte3mlvj\\host\\flexglove\\web\\app.js:112",
-      "C:\\Users\\bimba\\AppData\\Local\\Packages\\openai.codex_2p2nqsd0c76g0\\AC\\#!sandbox.{209bd05a-0c8a-4edc-812b-522188ba8f71}\\Temp\\tmpfte3mlvj\\host\\flexglove\\web\\app.js:174",
-      "C:\\Users\\bimba\\AppData\\Local\\Packages\\openai.codex_2p2nqsd0c76g0\\AC\\#!sandbox.{209bd05a-0c8a-4edc-812b-522188ba8f71}\\Temp\\tmpfte3mlvj\\host\\flexglove\\web\\app.js:181"
+      "host/flexglove/web/app.js:112",
+      "host/flexglove/web/app.js:174",
+      "host/flexglove/web/app.js:181"
     ]
   },
   "U11 icon tile": {
@@ -56,30 +56,30 @@
   "unslop 13 em dash": {
     "count": 42,
     "examples": [
-      "C:\\Users\\bimba\\AppData\\Local\\Packages\\openai.codex_2p2nqsd0c76g0\\AC\\#!sandbox.{209bd05a-0c8a-4edc-812b-522188ba8f71}\\Temp\\tmpfte3mlvj\\host\\flexglove\\web\\app.js:82",
-      "C:\\Users\\bimba\\AppData\\Local\\Packages\\openai.codex_2p2nqsd0c76g0\\AC\\#!sandbox.{209bd05a-0c8a-4edc-812b-522188ba8f71}\\Temp\\tmpfte3mlvj\\host\\flexglove\\web\\app.js:170",
-      "C:\\Users\\bimba\\AppData\\Local\\Packages\\openai.codex_2p2nqsd0c76g0\\AC\\#!sandbox.{209bd05a-0c8a-4edc-812b-522188ba8f71}\\Temp\\tmpfte3mlvj\\host\\flexglove\\web\\app.js:173",
-      "C:\\Users\\bimba\\AppData\\Local\\Packages\\openai.codex_2p2nqsd0c76g0\\AC\\#!sandbox.{209bd05a-0c8a-4edc-812b-522188ba8f71}\\Temp\\tmpfte3mlvj\\host\\flexglove\\web\\app.js:174",
-      "C:\\Users\\bimba\\AppData\\Local\\Packages\\openai.codex_2p2nqsd0c76g0\\AC\\#!sandbox.{209bd05a-0c8a-4edc-812b-522188ba8f71}\\Temp\\tmpfte3mlvj\\host\\flexglove\\web\\app.js:180"
+      "host/flexglove/web/app.js:82",
+      "host/flexglove/web/app.js:170",
+      "host/flexglove/web/app.js:173",
+      "host/flexglove/web/app.js:174",
+      "host/flexglove/web/app.js:180"
     ]
   },
   "U17 gradient or glow": {
     "count": 4,
     "examples": [
-      "C:\\Users\\bimba\\AppData\\Local\\Packages\\openai.codex_2p2nqsd0c76g0\\AC\\#!sandbox.{209bd05a-0c8a-4edc-812b-522188ba8f71}\\Temp\\tmpfte3mlvj\\host\\flexglove\\web\\style.css:38",
-      "C:\\Users\\bimba\\AppData\\Local\\Packages\\openai.codex_2p2nqsd0c76g0\\AC\\#!sandbox.{209bd05a-0c8a-4edc-812b-522188ba8f71}\\Temp\\tmpfte3mlvj\\host\\flexglove\\web\\style.css:124",
-      "C:\\Users\\bimba\\AppData\\Local\\Packages\\openai.codex_2p2nqsd0c76g0\\AC\\#!sandbox.{209bd05a-0c8a-4edc-812b-522188ba8f71}\\Temp\\tmpfte3mlvj\\host\\flexglove\\web\\style.css:182",
-      "C:\\Users\\bimba\\AppData\\Local\\Packages\\openai.codex_2p2nqsd0c76g0\\AC\\#!sandbox.{209bd05a-0c8a-4edc-812b-522188ba8f71}\\Temp\\tmpfte3mlvj\\host\\flexglove\\web\\style.css:221"
+      "host/flexglove/web/style.css:38",
+      "host/flexglove/web/style.css:124",
+      "host/flexglove/web/style.css:182",
+      "host/flexglove/web/style.css:221"
     ]
   },
   "U18 off-scale spacing": {
     "count": 5,
     "examples": [
-      "C:\\Users\\bimba\\AppData\\Local\\Packages\\openai.codex_2p2nqsd0c76g0\\AC\\#!sandbox.{209bd05a-0c8a-4edc-812b-522188ba8f71}\\Temp\\tmpfte3mlvj\\host\\flexglove\\web\\style.css:59",
-      "C:\\Users\\bimba\\AppData\\Local\\Packages\\openai.codex_2p2nqsd0c76g0\\AC\\#!sandbox.{209bd05a-0c8a-4edc-812b-522188ba8f71}\\Temp\\tmpfte3mlvj\\host\\flexglove\\web\\style.css:79",
-      "C:\\Users\\bimba\\AppData\\Local\\Packages\\openai.codex_2p2nqsd0c76g0\\AC\\#!sandbox.{209bd05a-0c8a-4edc-812b-522188ba8f71}\\Temp\\tmpfte3mlvj\\host\\flexglove\\web\\style.css:136",
-      "C:\\Users\\bimba\\AppData\\Local\\Packages\\openai.codex_2p2nqsd0c76g0\\AC\\#!sandbox.{209bd05a-0c8a-4edc-812b-522188ba8f71}\\Temp\\tmpfte3mlvj\\host\\flexglove\\web\\style.css:252",
-      "C:\\Users\\bimba\\AppData\\Local\\Packages\\openai.codex_2p2nqsd0c76g0\\AC\\#!sandbox.{209bd05a-0c8a-4edc-812b-522188ba8f71}\\Temp\\tmpfte3mlvj\\host\\flexglove\\web\\style.css:253"
+      "host/flexglove/web/style.css:59",
+      "host/flexglove/web/style.css:79",
+      "host/flexglove/web/style.css:136",
+      "host/flexglove/web/style.css:252",
+      "host/flexglove/web/style.css:253"
     ]
   },
   "U19 extra-heavy weight": {
