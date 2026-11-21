@@ -23,6 +23,13 @@ PORT = 8787
 
 
 def start_server(db):
+    global URL, PORT
+    # После остановки Linux оставляет старые соединения в TIME_WAIT. Новый
+    # процесс получает свежий порт; CLI иначе сам выбрал бы следующий порт.
+    with socket.socket() as available:
+        available.bind(("127.0.0.1", 0))
+        PORT = available.getsockname()[1]
+    URL = f"http://127.0.0.1:{PORT}"
     env = {**os.environ, "PYTHONPATH": str(ROOT / "host")}
     process = subprocess.Popen([sys.executable, "-m", "flexglove", "--demo", "--ui", "none",
                                "--port", str(PORT), "--db", str(db)], cwd=ROOT, env=env,
@@ -65,16 +72,11 @@ def mock(page, bends):
 
 
 def main():
-    global URL, PORT
     parser = argparse.ArgumentParser()
     parser.add_argument("--browser")
     args = parser.parse_args()
     OUT.mkdir(parents=True, exist_ok=True)
     (OUT / "failure.png").unlink(missing_ok=True)
-    with socket.socket() as available:
-        available.bind(("127.0.0.1", 0))
-        PORT = available.getsockname()[1]
-    URL = f"http://127.0.0.1:{PORT}"
     errors, results = [], []
     with tempfile.TemporaryDirectory(prefix="flexglove-preview-") as tmp, sync_playwright() as pw:
         db = Path(tmp) / "qa.db"
@@ -201,7 +203,7 @@ def main():
                 # Настоящий перезапуск процесса с той же временной БД.
                 server.terminate(); server.wait(timeout=10)
                 server = start_server(db)
-                page.reload(); wait_images(page)
+                page.goto(URL + "/#gestures"); wait_images(page)
                 assert page.locator("[data-thumbnail]").get_attribute("src") == new_image
                 # Другая рука, неполный набор сенсоров, изменённый порядок пальцев.
                 page.request.post(URL + "/api/connect", data={"kind": "mock", "n_channels": 2})
@@ -254,7 +256,10 @@ def main():
             if 'page' in locals() and not page.is_closed():
                 page.screenshot(path=str(OUT / "failure.png"))
                 print(page.locator('#gestureDialogStatus').inner_text(), flush=True)
-                print(json.dumps(state(page), ensure_ascii=False), flush=True)
+                try:
+                    print(json.dumps(state(page), ensure_ascii=False), flush=True)
+                except Exception as diagnostic_error:
+                    print(f"Снимок сервера недоступен: {diagnostic_error}", flush=True)
             raise
         finally:
             browser.close()
