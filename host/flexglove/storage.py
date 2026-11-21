@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
+import uuid
 from pathlib import Path
 from typing import Any
 
@@ -15,6 +16,12 @@ CREATE TABLE IF NOT EXISTS bindings (
 CREATE TABLE IF NOT EXISTS settings (
     key   TEXT PRIMARY KEY,
     value TEXT NOT NULL                    -- JSON
+);
+CREATE TABLE IF NOT EXISTS static_gestures (
+    id TEXT PRIMARY KEY,
+    profile TEXT NOT NULL,
+    payload TEXT NOT NULL,
+    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 """
 
@@ -64,3 +71,21 @@ class Storage:
 
     def close(self) -> None:
         self._db.close()
+
+    # Отдельная таблица: прежние bindings/settings сохраняются без миграции и удаления.
+    def gestures(self) -> list[dict]:
+        return [json.loads(row[0]) for row in self._db.execute(
+            "SELECT payload FROM static_gestures ORDER BY rowid").fetchall()]
+
+    def save_gesture(self, gesture: dict) -> dict:
+        gesture = {**gesture, "id": gesture.get("id") or uuid.uuid4().hex}
+        self._db.execute(
+            "INSERT INTO static_gestures(id, profile, payload) VALUES(?, ?, ?) "
+            "ON CONFLICT(id) DO UPDATE SET profile=excluded.profile, payload=excluded.payload, updated_at=datetime('now')",
+            (gesture["id"], gesture["context"]["profile"], json.dumps(gesture, ensure_ascii=False, allow_nan=False)))
+        self._db.commit()
+        return gesture
+
+    def delete_gesture(self, gesture_id: str) -> None:
+        self._db.execute("DELETE FROM static_gestures WHERE id=?", (gesture_id,))
+        self._db.commit()

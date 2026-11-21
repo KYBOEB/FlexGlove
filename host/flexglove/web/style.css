@@ -243,6 +243,12 @@ body.on-hand main { padding: 0; max-width: none; }
 .mini-hand { width: 56px; height: auto; }
 .gesture-words { font-size: 19px; font-weight: 700; line-height: 1.25; }
 .gesture-target { font-weight: 600; color: var(--accent); font-size: 14px; }
+.gesture-list { display: grid; gap: 12px; margin: 16px 0; }
+.learned-gesture { border: 1px solid var(--line); border-radius: 12px; padding: 14px; display: grid; gap: 8px; }
+.learned-gesture select { max-width: 100%; }
+.learned-gesture .row { flex-wrap: wrap; }
+#gestureProgress { width: 100%; accent-color: var(--accent); }
+#trainingStatus { color: var(--accent); }
 .fingers { display: grid; gap: 9px; }
 .finger-row { display: grid; gap: 3px; }
 .fr-top, .fr-bottom { display: flex; justify-content: space-between; gap: 8px; }

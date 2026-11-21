@@ -94,6 +94,16 @@ class MockRequest(BaseModel):
     yaw: float | None = Field(default=None, ge=-180, le=180)
 
 
+class TrainGestureRequest(BaseModel):
+    name: str = Field(min_length=1, max_length=80)
+    template_id: str | None = None
+
+
+class EditGestureRequest(BaseModel):
+    name: str | None = Field(default=None, min_length=1, max_length=80)
+    audio: str | None = None
+
+
 class AppState:
     def __init__(self, db_path: Path | str):
         self.storage = Storage(db_path)
@@ -108,6 +118,7 @@ class AppState:
                 await self.source.stop()
             finally:
                 self.source = None
+        self.engine.on_source_status(kind=None, name=None, connected=False, message="Не подключено")
 
     async def connect(self, req: ConnectRequest) -> None:
         async with self.lock:
@@ -195,6 +206,51 @@ def create_app(db_path: Path | str = DEFAULT_DB, demo: bool = False) -> FastAPI:
     @app.get("/api/meta")
     async def meta():
         return {"actions": catalog(), "fingers": FINGERS, "version": __version__, "imu_mounts": mount_catalog()}
+
+    @app.post("/api/gestures/train")
+    async def train_gesture(req: TrainGestureRequest):
+        try:
+            engine.train_gesture(req.name, req.template_id)
+        except ValueError as exc:
+            raise HTTPException(409, str(exc)) from exc
+        return engine.gestures.snapshot(engine.clock())
+
+    @app.post("/api/gestures/cancel")
+    async def cancel_gesture():
+        engine.gestures.suspend("Обучение отменено")
+        return {}
+
+    @app.patch("/api/gestures/{gesture_id}")
+    async def edit_gesture(gesture_id: str, req: EditGestureRequest):
+        try:
+            return engine.edit_gesture(gesture_id, name=req.name, audio=req.audio,
+                                       assign_audio="audio" in req.model_fields_set)
+        except ValueError as exc:
+            raise HTTPException(400, str(exc)) from exc
+
+    @app.delete("/api/gestures/{gesture_id}")
+    async def delete_gesture(gesture_id: str):
+        try:
+            engine.edit_gesture(gesture_id, delete=True)
+        except ValueError as exc:
+            raise HTTPException(400, str(exc)) from exc
+        return {}
+
+    @app.get("/api/audio/files")
+    async def audio_files():
+        return {"folder": str(engine.audio.folder), "files": engine.audio.files()}
+
+    @app.post("/api/audio/test/{gesture_id}")
+    async def test_audio(gesture_id: str):
+        gesture = next((t for t in engine.gestures.templates if t["id"] == gesture_id), None)
+        if gesture is None:
+            raise HTTPException(404, "Жест не найден")
+        return engine.audio.enqueue(gesture_id, gesture.get("audio"), "test")
+
+    @app.post("/api/audio/stop")
+    async def stop_audio():
+        engine.audio.stop()
+        return engine.audio.snapshot()
 
     # ---------- подключение ----------
     @app.get("/api/ble/scan")
