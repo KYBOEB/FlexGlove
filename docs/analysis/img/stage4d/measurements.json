@@ -1,0 +1,1669 @@
+{
+  "results": [
+    {
+      "kind": "gltf",
+      "hand": "right",
+      "world": [
+        -5.551115123125783e-17,
+        -8.881784197001252e-16,
+        0
+      ],
+      "actual": [
+        498.5000000000001,
+        328.5000000000001
+      ],
+      "expected": [
+        498.5,
+        328.5
+      ],
+      "error": 1.6077746776921858e-13,
+      "damping": false,
+      "autoRotate": false,
+      "meshes": 0,
+      "selfShadow": true,
+      "anchorModel": [
+        4.582330833077546,
+        0.08629542096972997,
+        -0.12715752283511028
+      ],
+      "width": 1366,
+      "height": 768,
+      "pose": "initial"
+    },
+    {
+      "kind": "gltf",
+      "hand": "right",
+      "world": [
+        1.1102230246251565e-16,
+        8.881784197001252e-16,
+        -2.220446049250313e-16
+      ],
+      "actual": [
+        498.5000000000001,
+        328.50000000000006
+      ],
+      "expected": [
+        498.5,
+        328.5
+      ],
+      "error": 1.2710574864626038e-13,
+      "damping": false,
+      "autoRotate": false,
+      "meshes": 0,
+      "selfShadow": true,
+      "anchorModel": [
+        4.582330833077546,
+        0.08629542096972997,
+        -0.12715752283511028
+      ],
+      "width": 1366,
+      "height": 768,
+      "pose": "fist"
+    },
+    {
+      "kind": "gltf",
+      "hand": "right",
+      "world": [
+        -4.440892098500626e-16,
+        -5.551115123125783e-17,
+        0
+      ],
+      "actual": [
+        498.5000000000001,
+        328.50000000000006
+      ],
+      "expected": [
+        498.5,
+        328.5
+      ],
+      "error": 1.2710574864626038e-13,
+      "damping": false,
+      "autoRotate": false,
+      "meshes": 0,
+      "selfShadow": true,
+      "anchorModel": [
+        4.582330833077546,
+        0.08629542096972997,
+        -0.12715752283511028
+      ],
+      "width": 1366,
+      "height": 768,
+      "pose": "roll"
+    },
+    {
+      "kind": "gltf",
+      "hand": "right",
+      "world": [
+        -1.1102230246251565e-16,
+        -8.881784197001252e-16,
+        -2.220446049250313e-16
+      ],
+      "actual": [
+        498.5000000000001,
+        328.5000000000001
+      ],
+      "expected": [
+        498.5,
+        328.5
+      ],
+      "error": 1.6077746776921858e-13,
+      "damping": false,
+      "autoRotate": false,
+      "meshes": 0,
+      "selfShadow": true,
+      "anchorModel": [
+        4.582330833077546,
+        0.08629542096972997,
+        -0.12715752283511028
+      ],
+      "width": 1366,
+      "height": 768,
+      "pose": "pitch"
+    },
+    {
+      "kind": "gltf",
+      "hand": "right",
+      "world": [
+        0,
+        -2.220446049250313e-16,
+        2.220446049250313e-16
+      ],
+      "actual": [
+        498.5000000000001,
+        328.50000000000006
+      ],
+      "expected": [
+        498.5,
+        328.5
+      ],
+      "error": 1.2710574864626038e-13,
+      "damping": false,
+      "autoRotate": false,
+      "meshes": 0,
+      "selfShadow": true,
+      "anchorModel": [
+        4.582330833077546,
+        0.08629542096972997,
+        -0.12715752283511028
+      ],
+      "width": 1366,
+      "height": 768,
+      "pose": "yaw"
+    },
+    {
+      "kind": "gltf",
+      "hand": "right",
+      "world": [
+        8.881784197001252e-16,
+        0,
+        -4.440892098500626e-16
+      ],
+      "actual": [
+        498.5000000000002,
+        328.5000000000002
+      ],
+      "expected": [
+        498.5,
+        328.5
+      ],
+      "error": 3.2155493553843715e-13,
+      "damping": false,
+      "autoRotate": false,
+      "meshes": 0,
+      "selfShadow": true,
+      "anchorModel": [
+        4.582330833077546,
+        0.08629542096972997,
+        -0.12715752283511028
+      ],
+      "width": 1366,
+      "pose": "mouse"
+    },
+    {
+      "kind": "gltf",
+      "hand": "right",
+      "world": [
+        0,
+        0,
+        -2.220446049250313e-16
+      ],
+      "actual": [
+        425.5,
+        278.50000000000006
+      ],
+      "expected": [
+        425.5,
+        278.5
+      ],
+      "error": 5.684341886080802e-14,
+      "damping": false,
+      "autoRotate": false,
+      "meshes": 0,
+      "selfShadow": true,
+      "anchorModel": [
+        4.582330833077546,
+        0.08629542096972997,
+        -0.12715752283511028
+      ],
+      "width": 1166,
+      "pose": "resize"
+    },
+    {
+      "kind": "gltf",
+      "hand": "left",
+      "world": [
+        -5.551115123125783e-17,
+        -8.881784197001252e-16,
+        -4.440892098500626e-16
+      ],
+      "actual": [
+        498.49999999999994,
+        328.5000000000001
+      ],
+      "expected": [
+        498.5,
+        328.5
+      ],
+      "error": 1.2710574864626038e-13,
+      "damping": false,
+      "autoRotate": false,
+      "meshes": 0,
+      "selfShadow": true,
+      "anchorModel": [
+        4.582330821681397,
+        -0.08629434921169032,
+        -0.12715666268329562
+      ],
+      "width": 1366,
+      "height": 768,
+      "pose": "initial"
+    },
+    {
+      "kind": "gltf",
+      "hand": "left",
+      "world": [
+        5.551115123125783e-17,
+        -1.7763568394002505e-15,
+        -4.440892098500626e-16
+      ],
+      "actual": [
+        498.49999999999994,
+        328.5000000000001
+      ],
+      "expected": [
+        498.5,
+        328.5
+      ],
+      "error": 1.2710574864626038e-13,
+      "damping": false,
+      "autoRotate": false,
+      "meshes": 0,
+      "selfShadow": true,
+      "anchorModel": [
+        4.582330821681397,
+        -0.08629434921169032,
+        -0.12715666268329562
+      ],
+      "width": 1366,
+      "height": 768,
+      "pose": "fist"
+    },
+    {
+      "kind": "gltf",
+      "hand": "left",
+      "world": [
+        -6.661338147750939e-16,
+        -4.440892098500626e-16,
+        -8.881784197001252e-16
+      ],
+      "actual": [
+        498.4999999999999,
+        328.5000000000001
+      ],
+      "expected": [
+        498.5,
+        328.5
+      ],
+      "error": 1.6077746776921858e-13,
+      "damping": false,
+      "autoRotate": false,
+      "meshes": 0,
+      "selfShadow": true,
+      "anchorModel": [
+        4.582330821681397,
+        -0.08629434921169032,
+        -0.12715666268329562
+      ],
+      "width": 1366,
+      "height": 768,
+      "pose": "roll"
+    },
+    {
+      "kind": "gltf",
+      "hand": "left",
+      "world": [
+        0,
+        0,
+        6.661338147750939e-16
+      ],
+      "actual": [
+        498.4999999999999,
+        328.5000000000001
+      ],
+      "expected": [
+        498.5,
+        328.5
+      ],
+      "error": 1.6077746776921858e-13,
+      "damping": false,
+      "autoRotate": false,
+      "meshes": 0,
+      "selfShadow": true,
+      "anchorModel": [
+        4.582330821681397,
+        -0.08629434921169032,
+        -0.12715666268329562
+      ],
+      "width": 1366,
+      "height": 768,
+      "pose": "pitch"
+    },
+    {
+      "kind": "gltf",
+      "hand": "left",
+      "world": [
+        0,
+        0,
+        4.440892098500626e-16
+      ],
+      "actual": [
+        498.4999999999999,
+        328.5000000000001
+      ],
+      "expected": [
+        498.5,
+        328.5
+      ],
+      "error": 1.6077746776921858e-13,
+      "damping": false,
+      "autoRotate": false,
+      "meshes": 0,
+      "selfShadow": true,
+      "anchorModel": [
+        4.582330821681397,
+        -0.08629434921169032,
+        -0.12715666268329562
+      ],
+      "width": 1366,
+      "height": 768,
+      "pose": "yaw"
+    },
+    {
+      "kind": "gltf",
+      "hand": "left",
+      "world": [
+        0,
+        -6.661338147750939e-16,
+        2.220446049250313e-16
+      ],
+      "actual": [
+        498.4999999999999,
+        328.5
+      ],
+      "expected": [
+        498.5,
+        328.5
+      ],
+      "error": 1.1368683772161603e-13,
+      "damping": false,
+      "autoRotate": false,
+      "meshes": 0,
+      "selfShadow": true,
+      "anchorModel": [
+        4.582330821681397,
+        -0.08629434921169032,
+        -0.12715666268329562
+      ],
+      "width": 1366,
+      "pose": "mouse"
+    },
+    {
+      "kind": "gltf",
+      "hand": "left",
+      "world": [
+        0,
+        -8.881784197001252e-16,
+        2.220446049250313e-16
+      ],
+      "actual": [
+        425.5000000000001,
+        278.5000000000001
+      ],
+      "expected": [
+        425.5,
+        278.5
+      ],
+      "error": 1.6077746776921858e-13,
+      "damping": false,
+      "autoRotate": false,
+      "meshes": 0,
+      "selfShadow": true,
+      "anchorModel": [
+        4.582330821681397,
+        -0.08629434921169032,
+        -0.12715666268329562
+      ],
+      "width": 1166,
+      "pose": "resize"
+    },
+    {
+      "kind": "primitive",
+      "hand": "right",
+      "world": [
+        0,
+        0,
+        0
+      ],
+      "actual": [
+        498.5,
+        328.50000000000006
+      ],
+      "expected": [
+        498.5,
+        328.5
+      ],
+      "error": 5.684341886080802e-14,
+      "damping": false,
+      "autoRotate": false,
+      "meshes": 0,
+      "selfShadow": false,
+      "anchorModel": [
+        4.5,
+        0,
+        0
+      ],
+      "width": 1366,
+      "height": 768,
+      "pose": "initial"
+    },
+    {
+      "kind": "primitive",
+      "hand": "right",
+      "world": [
+        0,
+        0,
+        0
+      ],
+      "actual": [
+        498.5,
+        328.50000000000006
+      ],
+      "expected": [
+        498.5,
+        328.5
+      ],
+      "error": 5.684341886080802e-14,
+      "damping": false,
+      "autoRotate": false,
+      "meshes": 0,
+      "selfShadow": false,
+      "anchorModel": [
+        4.5,
+        0,
+        0
+      ],
+      "width": 1366,
+      "height": 768,
+      "pose": "fist"
+    },
+    {
+      "kind": "primitive",
+      "hand": "right",
+      "world": [
+        0,
+        0,
+        0
+      ],
+      "actual": [
+        498.5,
+        328.50000000000006
+      ],
+      "expected": [
+        498.5,
+        328.5
+      ],
+      "error": 5.684341886080802e-14,
+      "damping": false,
+      "autoRotate": false,
+      "meshes": 0,
+      "selfShadow": false,
+      "anchorModel": [
+        4.5,
+        0,
+        0
+      ],
+      "width": 1366,
+      "height": 768,
+      "pose": "roll"
+    },
+    {
+      "kind": "primitive",
+      "hand": "right",
+      "world": [
+        0,
+        0,
+        0
+      ],
+      "actual": [
+        498.5,
+        328.50000000000006
+      ],
+      "expected": [
+        498.5,
+        328.5
+      ],
+      "error": 5.684341886080802e-14,
+      "damping": false,
+      "autoRotate": false,
+      "meshes": 0,
+      "selfShadow": false,
+      "anchorModel": [
+        4.5,
+        0,
+        0
+      ],
+      "width": 1366,
+      "height": 768,
+      "pose": "pitch"
+    },
+    {
+      "kind": "primitive",
+      "hand": "right",
+      "world": [
+        0,
+        0,
+        0
+      ],
+      "actual": [
+        498.5,
+        328.50000000000006
+      ],
+      "expected": [
+        498.5,
+        328.5
+      ],
+      "error": 5.684341886080802e-14,
+      "damping": false,
+      "autoRotate": false,
+      "meshes": 0,
+      "selfShadow": false,
+      "anchorModel": [
+        4.5,
+        0,
+        0
+      ],
+      "width": 1366,
+      "height": 768,
+      "pose": "yaw"
+    },
+    {
+      "kind": "primitive",
+      "hand": "right",
+      "world": [
+        0,
+        0,
+        0
+      ],
+      "actual": [
+        498.5000000000001,
+        328.49999999999983
+      ],
+      "expected": [
+        498.5,
+        328.5
+      ],
+      "error": 2.0495186137532014e-13,
+      "damping": false,
+      "autoRotate": false,
+      "meshes": 0,
+      "selfShadow": false,
+      "anchorModel": [
+        4.5,
+        0,
+        0
+      ],
+      "width": 1366,
+      "pose": "mouse"
+    },
+    {
+      "kind": "primitive",
+      "hand": "right",
+      "world": [
+        0,
+        0,
+        0
+      ],
+      "actual": [
+        425.5000000000001,
+        278.4999999999999
+      ],
+      "expected": [
+        425.5,
+        278.5
+      ],
+      "error": 1.6077746776921858e-13,
+      "damping": false,
+      "autoRotate": false,
+      "meshes": 0,
+      "selfShadow": false,
+      "anchorModel": [
+        4.5,
+        0,
+        0
+      ],
+      "width": 1166,
+      "pose": "resize"
+    },
+    {
+      "kind": "primitive",
+      "hand": "left",
+      "world": [
+        0,
+        0,
+        0
+      ],
+      "actual": [
+        498.5,
+        328.50000000000006
+      ],
+      "expected": [
+        498.5,
+        328.5
+      ],
+      "error": 5.684341886080802e-14,
+      "damping": false,
+      "autoRotate": false,
+      "meshes": 0,
+      "selfShadow": false,
+      "anchorModel": [
+        4.5,
+        0,
+        0
+      ],
+      "width": 1366,
+      "height": 768,
+      "pose": "initial"
+    },
+    {
+      "kind": "primitive",
+      "hand": "left",
+      "world": [
+        0,
+        0,
+        0
+      ],
+      "actual": [
+        498.5,
+        328.50000000000006
+      ],
+      "expected": [
+        498.5,
+        328.5
+      ],
+      "error": 5.684341886080802e-14,
+      "damping": false,
+      "autoRotate": false,
+      "meshes": 0,
+      "selfShadow": false,
+      "anchorModel": [
+        4.5,
+        0,
+        0
+      ],
+      "width": 1366,
+      "height": 768,
+      "pose": "fist"
+    },
+    {
+      "kind": "primitive",
+      "hand": "left",
+      "world": [
+        0,
+        0,
+        0
+      ],
+      "actual": [
+        498.5,
+        328.50000000000006
+      ],
+      "expected": [
+        498.5,
+        328.5
+      ],
+      "error": 5.684341886080802e-14,
+      "damping": false,
+      "autoRotate": false,
+      "meshes": 0,
+      "selfShadow": false,
+      "anchorModel": [
+        4.5,
+        0,
+        0
+      ],
+      "width": 1366,
+      "height": 768,
+      "pose": "roll"
+    },
+    {
+      "kind": "primitive",
+      "hand": "left",
+      "world": [
+        0,
+        0,
+        0
+      ],
+      "actual": [
+        498.5,
+        328.50000000000006
+      ],
+      "expected": [
+        498.5,
+        328.5
+      ],
+      "error": 5.684341886080802e-14,
+      "damping": false,
+      "autoRotate": false,
+      "meshes": 0,
+      "selfShadow": false,
+      "anchorModel": [
+        4.5,
+        0,
+        0
+      ],
+      "width": 1366,
+      "height": 768,
+      "pose": "pitch"
+    },
+    {
+      "kind": "primitive",
+      "hand": "left",
+      "world": [
+        0,
+        0,
+        0
+      ],
+      "actual": [
+        498.5,
+        328.50000000000006
+      ],
+      "expected": [
+        498.5,
+        328.5
+      ],
+      "error": 5.684341886080802e-14,
+      "damping": false,
+      "autoRotate": false,
+      "meshes": 0,
+      "selfShadow": false,
+      "anchorModel": [
+        4.5,
+        0,
+        0
+      ],
+      "width": 1366,
+      "height": 768,
+      "pose": "yaw"
+    },
+    {
+      "kind": "primitive",
+      "hand": "left",
+      "world": [
+        0,
+        0,
+        0
+      ],
+      "actual": [
+        498.5000000000001,
+        328.49999999999983
+      ],
+      "expected": [
+        498.5,
+        328.5
+      ],
+      "error": 2.0495186137532014e-13,
+      "damping": false,
+      "autoRotate": false,
+      "meshes": 0,
+      "selfShadow": false,
+      "anchorModel": [
+        4.5,
+        0,
+        0
+      ],
+      "width": 1366,
+      "pose": "mouse"
+    },
+    {
+      "kind": "primitive",
+      "hand": "left",
+      "world": [
+        0,
+        0,
+        0
+      ],
+      "actual": [
+        425.5000000000001,
+        278.4999999999999
+      ],
+      "expected": [
+        425.5,
+        278.5
+      ],
+      "error": 1.6077746776921858e-13,
+      "damping": false,
+      "autoRotate": false,
+      "meshes": 0,
+      "selfShadow": false,
+      "anchorModel": [
+        4.5,
+        0,
+        0
+      ],
+      "width": 1166,
+      "pose": "resize"
+    },
+    {
+      "kind": "gltf",
+      "hand": "right",
+      "world": [
+        5.551115123125783e-17,
+        8.881784197001252e-16,
+        -4.440892098500626e-16
+      ],
+      "actual": [
+        770,
+        499.5000000000001
+      ],
+      "expected": [
+        770,
+        499.5
+      ],
+      "error": 1.1368683772161603e-13,
+      "damping": false,
+      "autoRotate": false,
+      "meshes": 0,
+      "selfShadow": true,
+      "anchorModel": [
+        4.582330833077546,
+        0.08629542096972997,
+        -0.12715752283511028
+      ],
+      "width": 1920,
+      "height": 1080,
+      "pose": "initial"
+    },
+    {
+      "kind": "gltf",
+      "hand": "right",
+      "world": [
+        -5.551115123125783e-17,
+        8.881784197001252e-16,
+        0
+      ],
+      "actual": [
+        770,
+        499.5000000000001
+      ],
+      "expected": [
+        770,
+        499.5
+      ],
+      "error": 1.1368683772161603e-13,
+      "damping": false,
+      "autoRotate": false,
+      "meshes": 0,
+      "selfShadow": true,
+      "anchorModel": [
+        4.582330833077546,
+        0.08629542096972997,
+        -0.12715752283511028
+      ],
+      "width": 1920,
+      "height": 1080,
+      "pose": "fist"
+    },
+    {
+      "kind": "gltf",
+      "hand": "right",
+      "world": [
+        -4.440892098500626e-16,
+        1.1102230246251565e-16,
+        -8.881784197001252e-16
+      ],
+      "actual": [
+        770,
+        499.5000000000001
+      ],
+      "expected": [
+        770,
+        499.5
+      ],
+      "error": 1.1368683772161603e-13,
+      "damping": false,
+      "autoRotate": false,
+      "meshes": 0,
+      "selfShadow": true,
+      "anchorModel": [
+        4.582330833077546,
+        0.08629542096972997,
+        -0.12715752283511028
+      ],
+      "width": 1920,
+      "height": 1080,
+      "pose": "roll"
+    },
+    {
+      "kind": "gltf",
+      "hand": "right",
+      "world": [
+        -1.6653345369377348e-16,
+        0,
+        4.440892098500626e-16
+      ],
+      "actual": [
+        770,
+        499.5000000000001
+      ],
+      "expected": [
+        770,
+        499.5
+      ],
+      "error": 1.1368683772161603e-13,
+      "damping": false,
+      "autoRotate": false,
+      "meshes": 0,
+      "selfShadow": true,
+      "anchorModel": [
+        4.582330833077546,
+        0.08629542096972997,
+        -0.12715752283511028
+      ],
+      "width": 1920,
+      "height": 1080,
+      "pose": "pitch"
+    },
+    {
+      "kind": "gltf",
+      "hand": "right",
+      "world": [
+        0,
+        -2.220446049250313e-16,
+        -4.440892098500626e-16
+      ],
+      "actual": [
+        770,
+        499.5000000000001
+      ],
+      "expected": [
+        770,
+        499.5
+      ],
+      "error": 1.1368683772161603e-13,
+      "damping": false,
+      "autoRotate": false,
+      "meshes": 0,
+      "selfShadow": true,
+      "anchorModel": [
+        4.582330833077546,
+        0.08629542096972997,
+        -0.12715752283511028
+      ],
+      "width": 1920,
+      "height": 1080,
+      "pose": "yaw"
+    },
+    {
+      "kind": "gltf",
+      "hand": "right",
+      "world": [
+        -8.881784197001252e-16,
+        2.220446049250313e-16,
+        0
+      ],
+      "actual": [
+        769.9999999999998,
+        499.50000000000006
+      ],
+      "expected": [
+        770,
+        499.5
+      ],
+      "error": 2.3437142008433856e-13,
+      "damping": false,
+      "autoRotate": false,
+      "meshes": 0,
+      "selfShadow": true,
+      "anchorModel": [
+        4.582330833077546,
+        0.08629542096972997,
+        -0.12715752283511028
+      ],
+      "width": 1920,
+      "pose": "mouse"
+    },
+    {
+      "kind": "gltf",
+      "hand": "right",
+      "world": [
+        -8.881784197001252e-16,
+        2.220446049250313e-16,
+        -6.661338147750939e-16
+      ],
+      "actual": [
+        669.9999999999999,
+        436.5000000000001
+      ],
+      "expected": [
+        670,
+        436.5
+      ],
+      "error": 1.6077746776921858e-13,
+      "damping": false,
+      "autoRotate": false,
+      "meshes": 0,
+      "selfShadow": true,
+      "anchorModel": [
+        4.582330833077546,
+        0.08629542096972997,
+        -0.12715752283511028
+      ],
+      "width": 1720,
+      "pose": "resize"
+    },
+    {
+      "kind": "gltf",
+      "hand": "left",
+      "world": [
+        1.1102230246251565e-16,
+        8.881784197001252e-16,
+        0
+      ],
+      "actual": [
+        770.0000000000002,
+        499.49999999999994
+      ],
+      "expected": [
+        770,
+        499.5
+      ],
+      "error": 2.3437142008433856e-13,
+      "damping": false,
+      "autoRotate": false,
+      "meshes": 0,
+      "selfShadow": true,
+      "anchorModel": [
+        4.582330821681397,
+        -0.08629434921169032,
+        -0.12715666268329562
+      ],
+      "width": 1920,
+      "height": 1080,
+      "pose": "initial"
+    },
+    {
+      "kind": "gltf",
+      "hand": "left",
+      "world": [
+        0,
+        -8.881784197001252e-16,
+        -2.220446049250313e-16
+      ],
+      "actual": [
+        770.0000000000002,
+        499.5
+      ],
+      "expected": [
+        770,
+        499.5
+      ],
+      "error": 2.2737367544323206e-13,
+      "damping": false,
+      "autoRotate": false,
+      "meshes": 0,
+      "selfShadow": true,
+      "anchorModel": [
+        4.582330821681397,
+        -0.08629434921169032,
+        -0.12715666268329562
+      ],
+      "width": 1920,
+      "height": 1080,
+      "pose": "fist"
+    },
+    {
+      "kind": "gltf",
+      "hand": "left",
+      "world": [
+        -2.220446049250313e-16,
+        -4.440892098500626e-16,
+        0
+      ],
+      "actual": [
+        770.0000000000002,
+        499.49999999999994
+      ],
+      "expected": [
+        770,
+        499.5
+      ],
+      "error": 2.3437142008433856e-13,
+      "damping": false,
+      "autoRotate": false,
+      "meshes": 0,
+      "selfShadow": true,
+      "anchorModel": [
+        4.582330821681397,
+        -0.08629434921169032,
+        -0.12715666268329562
+      ],
+      "width": 1920,
+      "height": 1080,
+      "pose": "roll"
+    },
+    {
+      "kind": "gltf",
+      "hand": "left",
+      "world": [
+        -5.551115123125783e-17,
+        0,
+        6.661338147750939e-16
+      ],
+      "actual": [
+        770.0000000000002,
+        499.49999999999994
+      ],
+      "expected": [
+        770,
+        499.5
+      ],
+      "error": 2.3437142008433856e-13,
+      "damping": false,
+      "autoRotate": false,
+      "meshes": 0,
+      "selfShadow": true,
+      "anchorModel": [
+        4.582330821681397,
+        -0.08629434921169032,
+        -0.12715666268329562
+      ],
+      "width": 1920,
+      "height": 1080,
+      "pose": "pitch"
+    },
+    {
+      "kind": "gltf",
+      "hand": "left",
+      "world": [
+        0,
+        0,
+        0
+      ],
+      "actual": [
+        770.0000000000002,
+        499.49999999999994
+      ],
+      "expected": [
+        770,
+        499.5
+      ],
+      "error": 2.3437142008433856e-13,
+      "damping": false,
+      "autoRotate": false,
+      "meshes": 0,
+      "selfShadow": true,
+      "anchorModel": [
+        4.582330821681397,
+        -0.08629434921169032,
+        -0.12715666268329562
+      ],
+      "width": 1920,
+      "height": 1080,
+      "pose": "yaw"
+    },
+    {
+      "kind": "gltf",
+      "hand": "left",
+      "world": [
+        0,
+        0,
+        6.661338147750939e-16
+      ],
+      "actual": [
+        769.9999999999997,
+        499.50000000000006
+      ],
+      "expected": [
+        770,
+        499.5
+      ],
+      "error": 3.4576501834057003e-13,
+      "damping": false,
+      "autoRotate": false,
+      "meshes": 0,
+      "selfShadow": true,
+      "anchorModel": [
+        4.582330821681397,
+        -0.08629434921169032,
+        -0.12715666268329562
+      ],
+      "width": 1920,
+      "pose": "mouse"
+    },
+    {
+      "kind": "gltf",
+      "hand": "left",
+      "world": [
+        8.881784197001252e-16,
+        -6.661338147750939e-16,
+        -2.220446049250313e-16
+      ],
+      "actual": [
+        670,
+        436.5000000000004
+      ],
+      "expected": [
+        670,
+        436.5
+      ],
+      "error": 3.979039320256561e-13,
+      "damping": false,
+      "autoRotate": false,
+      "meshes": 0,
+      "selfShadow": true,
+      "anchorModel": [
+        4.582330821681397,
+        -0.08629434921169032,
+        -0.12715666268329562
+      ],
+      "width": 1720,
+      "pose": "resize"
+    },
+    {
+      "kind": "primitive",
+      "hand": "right",
+      "world": [
+        0,
+        0,
+        0
+      ],
+      "actual": [
+        770,
+        499.5
+      ],
+      "expected": [
+        770,
+        499.5
+      ],
+      "error": 0,
+      "damping": false,
+      "autoRotate": false,
+      "meshes": 0,
+      "selfShadow": false,
+      "anchorModel": [
+        4.5,
+        0,
+        0
+      ],
+      "width": 1920,
+      "height": 1080,
+      "pose": "initial"
+    },
+    {
+      "kind": "primitive",
+      "hand": "right",
+      "world": [
+        0,
+        0,
+        0
+      ],
+      "actual": [
+        770,
+        499.5
+      ],
+      "expected": [
+        770,
+        499.5
+      ],
+      "error": 0,
+      "damping": false,
+      "autoRotate": false,
+      "meshes": 0,
+      "selfShadow": false,
+      "anchorModel": [
+        4.5,
+        0,
+        0
+      ],
+      "width": 1920,
+      "height": 1080,
+      "pose": "fist"
+    },
+    {
+      "kind": "primitive",
+      "hand": "right",
+      "world": [
+        0,
+        0,
+        0
+      ],
+      "actual": [
+        770,
+        499.5
+      ],
+      "expected": [
+        770,
+        499.5
+      ],
+      "error": 0,
+      "damping": false,
+      "autoRotate": false,
+      "meshes": 0,
+      "selfShadow": false,
+      "anchorModel": [
+        4.5,
+        0,
+        0
+      ],
+      "width": 1920,
+      "height": 1080,
+      "pose": "roll"
+    },
+    {
+      "kind": "primitive",
+      "hand": "right",
+      "world": [
+        0,
+        0,
+        0
+      ],
+      "actual": [
+        770,
+        499.5
+      ],
+      "expected": [
+        770,
+        499.5
+      ],
+      "error": 0,
+      "damping": false,
+      "autoRotate": false,
+      "meshes": 0,
+      "selfShadow": false,
+      "anchorModel": [
+        4.5,
+        0,
+        0
+      ],
+      "width": 1920,
+      "height": 1080,
+      "pose": "pitch"
+    },
+    {
+      "kind": "primitive",
+      "hand": "right",
+      "world": [
+        0,
+        0,
+        0
+      ],
+      "actual": [
+        770,
+        499.5
+      ],
+      "expected": [
+        770,
+        499.5
+      ],
+      "error": 0,
+      "damping": false,
+      "autoRotate": false,
+      "meshes": 0,
+      "selfShadow": false,
+      "anchorModel": [
+        4.5,
+        0,
+        0
+      ],
+      "width": 1920,
+      "height": 1080,
+      "pose": "yaw"
+    },
+    {
+      "kind": "primitive",
+      "hand": "right",
+      "world": [
+        0,
+        0,
+        0
+      ],
+      "actual": [
+        769.9999999999998,
+        499.4999999999997
+      ],
+      "expected": [
+        770,
+        499.5
+      ],
+      "error": 3.639754730461873e-13,
+      "damping": false,
+      "autoRotate": false,
+      "meshes": 0,
+      "selfShadow": false,
+      "anchorModel": [
+        4.5,
+        0,
+        0
+      ],
+      "width": 1920,
+      "pose": "mouse"
+    },
+    {
+      "kind": "primitive",
+      "hand": "right",
+      "world": [
+        0,
+        0,
+        0
+      ],
+      "actual": [
+        670,
+        436.49999999999983
+      ],
+      "expected": [
+        670,
+        436.5
+      ],
+      "error": 1.7053025658242404e-13,
+      "damping": false,
+      "autoRotate": false,
+      "meshes": 0,
+      "selfShadow": false,
+      "anchorModel": [
+        4.5,
+        0,
+        0
+      ],
+      "width": 1720,
+      "pose": "resize"
+    },
+    {
+      "kind": "primitive",
+      "hand": "left",
+      "world": [
+        0,
+        0,
+        0
+      ],
+      "actual": [
+        770,
+        499.5
+      ],
+      "expected": [
+        770,
+        499.5
+      ],
+      "error": 0,
+      "damping": false,
+      "autoRotate": false,
+      "meshes": 0,
+      "selfShadow": false,
+      "anchorModel": [
+        4.5,
+        0,
+        0
+      ],
+      "width": 1920,
+      "height": 1080,
+      "pose": "initial"
+    },
+    {
+      "kind": "primitive",
+      "hand": "left",
+      "world": [
+        0,
+        0,
+        0
+      ],
+      "actual": [
+        770,
+        499.5
+      ],
+      "expected": [
+        770,
+        499.5
+      ],
+      "error": 0,
+      "damping": false,
+      "autoRotate": false,
+      "meshes": 0,
+      "selfShadow": false,
+      "anchorModel": [
+        4.5,
+        0,
+        0
+      ],
+      "width": 1920,
+      "height": 1080,
+      "pose": "fist"
+    },
+    {
+      "kind": "primitive",
+      "hand": "left",
+      "world": [
+        0,
+        0,
+        0
+      ],
+      "actual": [
+        770,
+        499.5
+      ],
+      "expected": [
+        770,
+        499.5
+      ],
+      "error": 0,
+      "damping": false,
+      "autoRotate": false,
+      "meshes": 0,
+      "selfShadow": false,
+      "anchorModel": [
+        4.5,
+        0,
+        0
+      ],
+      "width": 1920,
+      "height": 1080,
+      "pose": "roll"
+    },
+    {
+      "kind": "primitive",
+      "hand": "left",
+      "world": [
+        0,
+        0,
+        0
+      ],
+      "actual": [
+        770,
+        499.5
+      ],
+      "expected": [
+        770,
+        499.5
+      ],
+      "error": 0,
+      "damping": false,
+      "autoRotate": false,
+      "meshes": 0,
+      "selfShadow": false,
+      "anchorModel": [
+        4.5,
+        0,
+        0
+      ],
+      "width": 1920,
+      "height": 1080,
+      "pose": "pitch"
+    },
+    {
+      "kind": "primitive",
+      "hand": "left",
+      "world": [
+        0,
+        0,
+        0
+      ],
+      "actual": [
+        770,
+        499.5
+      ],
+      "expected": [
+        770,
+        499.5
+      ],
+      "error": 0,
+      "damping": false,
+      "autoRotate": false,
+      "meshes": 0,
+      "selfShadow": false,
+      "anchorModel": [
+        4.5,
+        0,
+        0
+      ],
+      "width": 1920,
+      "height": 1080,
+      "pose": "yaw"
+    },
+    {
+      "kind": "primitive",
+      "hand": "left",
+      "world": [
+        0,
+        0,
+        0
+      ],
+      "actual": [
+        769.9999999999998,
+        499.4999999999997
+      ],
+      "expected": [
+        770,
+        499.5
+      ],
+      "error": 3.639754730461873e-13,
+      "damping": false,
+      "autoRotate": false,
+      "meshes": 0,
+      "selfShadow": false,
+      "anchorModel": [
+        4.5,
+        0,
+        0
+      ],
+      "width": 1920,
+      "pose": "mouse"
+    },
+    {
+      "kind": "primitive",
+      "hand": "left",
+      "world": [
+        0,
+        0,
+        0
+      ],
+      "actual": [
+        670,
+        436.49999999999983
+      ],
+      "expected": [
+        670,
+        436.5
+      ],
+      "error": 1.7053025658242404e-13,
+      "damping": false,
+      "autoRotate": false,
+      "meshes": 0,
+      "selfShadow": false,
+      "anchorModel": [
+        4.5,
+        0,
+        0
+      ],
+      "width": 1720,
+      "pose": "resize"
+    }
+  ],
+  "pageErrors": []
+}

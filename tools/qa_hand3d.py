@@ -9,6 +9,10 @@ ROOT = Path(__file__).resolve().parents[1]
 OUT = ROOT / 'docs/analysis/img/stage4d'
 OUT.mkdir(parents=True, exist_ok=True)
 
+def snapshot(page, name):
+    page.locator(".side").evaluate("el => el.scrollTop = 0")
+    (OUT / name).write_bytes(page.screenshot())
+
 MEASURE = '''() => {
  const h=window.__qaHand, m=h.model;
  h.scene.updateMatrixWorld(true);
@@ -50,7 +54,7 @@ with sync_playwright() as p:
    page.goto(f'http://127.0.0.1:{port}')
    page.wait_for_function('window.__qaHand?.model?.kind === "gltf"')
    page.wait_for_timeout(3000)
-   page.screenshot(path=str(OUT/f'{"before" if before else "after"}-{width}.png'))
+   snapshot(page, f'{"before" if before else "after"}-{width}.png')
    if before:
     page.close(); continue
    assert page.locator('#sideCal').inner_text().startswith('✓ Демо:')
@@ -73,7 +77,7 @@ with sync_playwright() as p:
       assert not row['damping'] and not row['autoRotate']
       assert row['meshes']==0 # нет отдельного пола или тени в сцене
       if row['kind']=='gltf': assert row['selfShadow']
-      page.screenshot(path=str(OUT/f'after-{width}-{row["kind"]}-{hand}-{pose}.png'))
+      snapshot(page, f'after-{width}-{row["kind"]}-{hand}-{pose}.png')
      canvas=page.locator('#hand3d canvas').bounding_box()
      x,y=canvas['x']+canvas['width']/2,canvas['y']+canvas['height']/2
      page.mouse.move(x,y); page.mouse.down(); page.mouse.move(x+150,y+70,steps=8); page.mouse.up()
@@ -89,18 +93,18 @@ with sync_playwright() as p:
    page.wait_for_timeout(3200)
    assert 'Нет связи с приложением' not in page.locator('#sideSrc').inner_text()
    assert 'ok' not in (page.locator('#sideDot').get_attribute('class') or '')
-   page.screenshot(path=str(OUT/f'after-{width}-source-disconnected.png'))
+   snapshot(page, f'after-{width}-source-disconnected.png')
    page.request.post(f'http://127.0.0.1:{port}/api/connect',data={'kind':'mock'})
    page.wait_for_timeout(400)
    drop[0]=True
    page.wait_for_timeout(3200)
    assert 'ok' not in (page.locator('#sideDot').get_attribute('class') or '')
    assert 'Нет связи с приложением' in page.locator('#sideSrc').inner_text()
-   page.screenshot(path=str(OUT/f'after-{width}-websocket-stalled.png'))
+   snapshot(page, f'after-{width}-websocket-stalled.png')
    page.evaluate('window.__qaWS?.close()')
    page.wait_for_timeout(500)
    assert 'ok' not in (page.locator('#sideDot').get_attribute('class') or '')
-   page.screenshot(path=str(OUT/f'after-{width}-websocket-disconnected.png'))
+   snapshot(page, f'after-{width}-websocket-disconnected.png')
    page.close()
  (OUT/'measurements.json').write_text(json.dumps({'results':results,'pageErrors':errors},ensure_ascii=False,indent=2),encoding='utf-8')
  assert not errors,errors
