@@ -1,0 +1,43 @@
+{
+  "results": [
+    {
+      "viewport": [
+        1366,
+        768
+      ],
+      "reference_exact": true,
+      "live_mirror": true,
+      "cancel": true,
+      "retrain": true,
+      "process_restart": true,
+      "both_hands_missing_sensors": true,
+      "static_images": true,
+      "active_renderers_after_dialog": 1,
+      "no_repeat": true,
+      "mouse_rotated_camera_mirrored": true,
+      "preview_palm_centered": true,
+      "retry_after_movement_error": true,
+      "gpu_memory_disposed": true
+    },
+    {
+      "viewport": [
+        1920,
+        1080
+      ],
+      "reference_exact": true,
+      "live_mirror": true,
+      "cancel": true,
+      "retrain": true,
+      "process_restart": true,
+      "both_hands_missing_sensors": true,
+      "static_images": true,
+      "active_renderers_after_dialog": 1,
+      "no_repeat": true,
+      "mouse_rotated_camera_mirrored": true,
+      "preview_palm_centered": true,
+      "retry_after_movement_error": true,
+      "gpu_memory_disposed": true
+    }
+  ],
+  "page_errors": []
+}

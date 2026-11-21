@@ -83,4 +83,24 @@ for(const hand of ['right','left']) for(const kind of ['gltf','primitive']) {
  }
  assert.equal(h.scene.children.filter(o=>o.isMesh).length,0);
 }
+// Направление главного вида сохраняется; расстояние и проекция принадлежат маленькому окну.
+const preview=Object.create(Hand3D.prototype);
+Object.assign(preview,{camera:new T.PerspectiveCamera(30,320/240,1,600), radius:10,
+ container:{clientWidth:320,clientHeight:240},insets:{top:0,bottom:0}});
+preview.controls={target:new T.Vector3(),enabled:true,update(){preview.camera.lookAt(this.target);}};
+const source={camera:new T.PerspectiveCamera(),controls:{target:new T.Vector3(2,-1,4)}};
+source.camera.position.set(20,30,40);
+const original=source.camera.position.clone();
+for(const width of [320,180,640]) {
+ preview.container.clientWidth=width;
+ preview.camera.aspect=width/240;
+ preview.syncView(source);
+ preview.camera.updateMatrixWorld(true);  // В браузере матрицы обновляет renderer.render().
+ assert.ok(preview.camera.position.clone().normalize().distanceTo(original.clone().sub(source.controls.target).normalize())<1e-10);
+ assert.ok(Math.abs(preview.camera.position.length()-preview.fitDistance())<1e-10);
+ const center=preview.controls.target.clone().project(preview.camera);
+ assert.ok(Math.hypot(center.x,center.y)<1e-10);
+ assert.ok(source.camera.position.equals(original));
+ assert.equal(preview.controls.enabled,false);
+}
 console.log(JSON.stringify({count}));

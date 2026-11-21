@@ -419,6 +419,15 @@ class Hand3D {
     this.controls.update();
   }
 
+  /** Живой предпросмотр: направление общего вида, собственное кадрирование вокруг ладони. */
+  syncView(source) {
+    this.controls.enabled = false;
+    this.controls.target.set(0, 0, 0);
+    this.camera.up.copy(source.camera.up);
+    this.camera.position.copy(source.camera.position).sub(source.controls.target);
+    this._fit();
+  }
+
   // теневая камера основного света — вплотную вокруг сферы кисти (чётче самозатенение, без обрезанных краёв)
   _fitLight() {
     const r = this.radius + 1.5, k = this.key;
@@ -455,6 +464,7 @@ class Hand3D {
       this.qCurrent.copy(this.mirror.qCurrent);
       this.pivot.quaternion.copy(this.qCurrent);
       for (const f of FINGERS) this._poseFinger(f, this.bendCurrent[f] = this.mirror.bendCurrent[f]);
+      this.syncView(this.mirror);
     }
     this.controls.update();
     if (this.container.offsetParent) this.renderer.render(this.scene, this.camera);

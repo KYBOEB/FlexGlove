@@ -133,6 +133,22 @@ def main():
                 page.wait_for_function("!document.querySelector('.learned-gesture')")
                 mock(page, [.1, .8, .65, .1, .2])
                 prior = state(page)["gesture_system"]["triggered"]
+                # Реальное вращение мышью главной сцены, затем открытие создания.
+                page.locator('a[href="#hand"]').click()
+                page.locator("#hand3d canvas").wait_for(state="visible")
+                initial_direction = page.evaluate("window.__qaHands[0].camera.position.clone().sub(window.__qaHands[0].controls.target).normalize().toArray()")
+                box = page.locator("#hand3d canvas").bounding_box()
+                x, y = box["x"] + box["width"] / 2, box["y"] + box["height"] / 2
+                page.mouse.move(x, y)
+                page.mouse.down()
+                page.mouse.move(x + 140, y - 80, steps=8)
+                page.mouse.up()
+                page.screenshot(path=str(OUT / f"rotated-main-{width}.png"))
+                assert page.evaluate("""before => {
+                  const h=window.__qaHands[0], dir=h.camera.position.clone().sub(h.controls.target).normalize();
+                  return Math.hypot(...dir.toArray().map((v,i)=>v-before[i])) > .1;
+                }""", initial_direction)
+                page.locator('a[href="#gestures"]').click()
                 page.locator("#createGesture").click()
                 page.locator("#gestureName").fill("Указательный и средний")
                 page.wait_for_function("window.__qaHands.some(h => !h.disposed && h.container.id==='gesturePreview' && h.model?.kind==='gltf')")
@@ -141,6 +157,18 @@ def main():
                   const main=window.__qaHands[0], preview=window.__qaHands.find(h=>!h.disposed && h.container.id==='gesturePreview');
                   return main.qCurrent.angleTo(preview.qCurrent)<.001 && Object.keys(main.bendCurrent).every(f=>Math.abs(main.bendCurrent[f]-preview.bendCurrent[f])<.001);
                 }""")
+                view = page.evaluate("""() => {
+                  const main=window.__qaHands[0], h=window.__qaHands.find(h=>!h.disposed && h.container.id==='gesturePreview');
+                  const a=main.camera.position.clone().sub(main.controls.target).normalize();
+                  const b=h.camera.position.clone().sub(h.controls.target).normalize();
+                  const palm=h.controls.target.clone().project(h.camera);
+                  return {direction_error:a.distanceTo(b), center_error:Math.hypot(palm.x,palm.y),
+                    distance:h.camera.position.distanceTo(h.controls.target), fit:h.fitDistance(),
+                    main_distance:main.camera.position.distanceTo(main.controls.target),
+                    up_error:main.camera.up.distanceTo(h.camera.up)};
+                }""")
+                assert view["direction_error"] < 1e-8 and view["up_error"] < 1e-8, view
+                assert view["center_error"] < 1e-8 and abs(view["distance"] - view["fit"]) < 1e-8, view
                 page.screenshot(path=str(OUT / f"create-{width}.png"))
                 train_until_saved(page)
                 wait_images(page)
@@ -149,6 +177,11 @@ def main():
                 template = state(page)["gesture_system"]["templates"][0]
                 image = page.locator("[data-thumbnail]").get_attribute("src")
                 assert page.locator("#gestureSaved").get_attribute("src") == image
+                assert page.evaluate("""expected => {
+                  const h=window.__qaHands.filter(h=>h.container.className==='thumbnail-render-host').at(-1);
+                  const actual=h.camera.position.clone().sub(h.controls.target).normalize().toArray();
+                  return Math.hypot(...actual.map((v,i)=>v-expected[i])) < 1e-8;
+                }""", initial_direction)  # PNG остаётся в исходном фиксированном ракурсе.
                 assert state(page)["gesture_system"]["triggered"] == prior
                 # Снимок действительно отрисован по эталону, а не по живым каналам.
                 assert page.evaluate("""t => {
@@ -263,6 +296,7 @@ def main():
                                 "cancel": True, "retrain": True, "process_restart": True,
                                 "both_hands_missing_sensors": True, "static_images": True,
                                 "active_renderers_after_dialog": 1, "no_repeat": True,
+                                "mouse_rotated_camera_mirrored": True, "preview_palm_centered": True,
                                 "retry_after_movement_error": True, "gpu_memory_disposed": True})
                 # Следующий проход начинает с обычной правой руки/пяти каналов.
                 page.request.post(URL + "/api/settings", data={"hand": "right", "finger_map": ["thumb", "index", "middle", "ring", "pinky"]})
