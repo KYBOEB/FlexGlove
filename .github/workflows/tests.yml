@@ -42,6 +42,7 @@ jobs:
         if: runner.os == 'Linux'
         run: python -m playwright install-deps chromium
       - name: 3D gesture preview, cancellation, retraining and restart
+        timeout-minutes: 5
         run: python ../tools/qa_gesture_preview.py
       - uses: actions/upload-artifact@v4
         if: always()

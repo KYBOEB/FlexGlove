@@ -30,7 +30,7 @@ def main():
             page.goto(URL)
             page.wait_for_function("document.querySelector('#calStatus').textContent.includes('известные')")
             # Удаляются только результаты предыдущего запуска этой QA-базы.
-            assert page.request.get(URL + "/api/ping").json()["version"] == "0.8.1"
+            assert page.request.get(URL + "/api/ping").json()["version"] == "0.8.2"
             for template in page.request.get(URL + "/api/state").json()["gesture_system"]["templates"]:
                 page.request.delete(URL + "/api/gestures/" + template["id"])
             prior_event = page.request.get(URL + "/api/state").json()["gesture_system"]["triggered"]
