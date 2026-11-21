@@ -183,14 +183,15 @@ def main():
                 page.locator("#gestureClose").click()
                 page.locator("#createGesture").click()
                 page.locator("#gestureName").fill("Отменить")
-                page.locator("#gestureTrain").click()
-                page.locator("#gestureClose").click()
+                # Два locator.click ждут стабильности кадров и на SwiftShader могут
+                # занять больше секунды. Проверяем отмену именно до окончания записи.
+                page.evaluate("document.querySelector('#gestureTrain').click(); document.querySelector('#gestureClose').click()")
                 page.wait_for_timeout(1200)
                 assert state(page)["gesture_system"]["templates"] == [template]
                 # Ошибка движения и повторная запись в том же окне.
                 page.locator("#createGesture").click()
                 page.locator("#gestureName").fill("Повтор после движения")
-                page.locator("#gestureTrain").click()
+                page.evaluate("document.querySelector('#gestureTrain').click()")
                 page.wait_for_timeout(150)
                 mock(page, [.15] * 5)
                 page.wait_for_function("document.querySelector('#gestureDialogStatus').textContent.includes('движение')")
