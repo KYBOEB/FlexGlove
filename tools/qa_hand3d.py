@@ -46,7 +46,7 @@ with sync_playwright() as p:
    page.on('pageerror',lambda e: errors.append(str(e)))
    def instrument(route):
     response=route.fetch()
-    text=response.text().replace('return new Hand3D(container);','return (window.__qaHand = new Hand3D(container));').replace('this.model = model;', 'this.model = model; this.__qaModelHand = this.hand;')
+    text=response.text().replace('return new Hand3D(container);','return (window.__qaHand = new Hand3D(container));').replace('return new Hand3D(container, options);', 'const h = new Hand3D(container, options); if (container.id === "hand3d") window.__qaHand = h; return h;').replace('this.model = model;', 'this.model = model; this.__qaModelHand = this.hand;')
     route.fulfill(response=response,body=text)
    page.route('**/hand3d.js?*',instrument)
    page.request.post(f'http://127.0.0.1:{port}/api/connect',data={'kind':'mock'})

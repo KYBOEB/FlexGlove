@@ -82,9 +82,11 @@ def test_navigation_preserves_controls_once_on_their_screens():
     for screen, controls in {
         "hand": ["hand3d", "gestureWords", "gestureProgress", "demoStrip", "sideErrors", "imuZero", "viewReset"],
         "gestures": ["createGesture", "gestureList", "cancelTraining", "audioResult", "audioStatus", "stopAudio"],
-        "signals": ["chart", "chBody", "recBtn", "replayFile", "pipePreset", "pipeJson", "eventLog", "imuBox", "fingerRows"],
+        "signals": ["chart", "chBody", "recBtn", "replayFile", "pipePreset", "pipeJson", "eventLog", "imuBox", "imuPitch", "imuRoll", "imuYaw", "sideImu"],
         "settings": ["srcKind", "fingerMap", "handSide", "imuMount", "calWizardBtn", "calReset", "imuCal"],
     }.items():
         for control in controls:
             assert screens.ids[control] == "tab-" + screen, control
+    assert "fingerRows" not in screens.ids
+    assert "fingerNote" not in screens.ids
     assert not {"mainTarget", "gestureMini", "stopAudioMain", "createGestureSettings", "stagePose"} & screens.ids.keys()

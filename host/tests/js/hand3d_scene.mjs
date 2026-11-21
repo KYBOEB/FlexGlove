@@ -62,6 +62,25 @@ for(const hand of ['right','left']) for(const kind of ['gltf','primitive']) {
   });
   count++;
  }
+ // Эталон отличается от текущей позы; порядок каналов также отличается от FINGERS.
+ const template={context:{hand,channels:[{finger:'ring'},{finger:'thumb'}]},reference:[.73,.28]};
+ h.qTarget=new T.Quaternion(); h.qCurrent=new T.Quaternion();
+ h.bendTarget={}; h.bendCurrent={}; h.resetView=()=>{};
+ h.setHand=value=>assert.equal(value,hand);
+ h.ready=Promise.resolve();
+ const rendered=[];
+ h.renderer={render(){rendered.push({...h.bendCurrent});},domElement:{toDataURL:()=> 'data:image/png;base64,model'}};
+ const image=await h.snapshot(template);
+ assert.equal(image,'data:image/png;base64,model');
+ assert.equal(h.bendCurrent.ring,.73); assert.equal(h.bendCurrent.thumb,.28);
+ for(const f of ['index','middle','pinky']) assert.equal(h.bendCurrent[f],.12);
+ assert.deepEqual([...h.sensed],['ring','thumb']);
+ assert.equal(rendered.length,1);
+ assert.ok(h.qCurrent.equals(h.qTarget));
+ if(kind==='gltf') {
+  assert.equal(model.boneGhost.value[model.boneIndex['index-finger-phalanx-proximal']],1);
+  assert.equal(model.boneGhost.value[model.boneIndex['ring-finger-phalanx-proximal']],0);
+ }
  assert.equal(h.scene.children.filter(o=>o.isMesh).length,0);
 }
 console.log(JSON.stringify({count}));
