@@ -7,7 +7,7 @@
   let META = { actions: [], fingers: [], version: "" };
   let S = null;
   let lastEventTs = 0;
-  let gestureKey = "", mapKey = "", tableKey = "", rowsKey = "";
+  let gestureKey = "", mapKey = "", tableKey = "";
 
   const handSettings = new HandView($("#handSettings"));
   const handMain = new HandView($("#handMain"), { onFinger: (f) => demoToggleFinger(f) });   // 2D, если нет WebGL
@@ -120,6 +120,10 @@
     handMain.set(bends); handSettings.set(bends);
     const ori = S.orientation;
     if (hand3d) hand3d.setTarget({ q: ori && !ori.stale ? ori.q_world : null, bends, sensed: new Set(map.slice(0, n)), hand: S.hand });
+    if (gesturePreview) {
+      gesturePreview.setTarget({ q: ori && !ori.stale ? ori.q_world : null, bends, sensed: new Set(map.slice(0, n)), hand: S.hand });
+      gesturePreview.mirror = hand3d;
+    }
     renderSide(src, connected, chans, map, ori);
     renderLog();
 
@@ -212,33 +216,6 @@
     $("#gestureReason").hidden = !holding;
     $("#gestureReason").textContent = holding
       ? (gs.latched === candidate.id || gs.needs_exit ? "Для повтора выйдите из позы" : "Удерживайте позу") : "";
-
-    // пальцы: название, полоса, слово; мелко — сырое и «Δ от ладони»
-    const key = chans.length + "|" + map.join();
-    const box = $("#fingerRows");
-    if (key !== rowsKey) {
-      rowsKey = key;
-      box.innerHTML = chans.map((_, i) => `<div class="finger-row">
-        <div class="fr-top"><span class="fr-name"></span><b class="fr-pct"></b></div>
-        <div class="bar"><div class="fill"></div></div>
-        <div class="fr-bottom"><span class="fr-word"></span><span class="fr-raw"></span></div></div>`).join("");
-    }
-    chans.forEach((ch, i) => {
-      const row = box.children[i];
-      const b = ch.stale ? 0 : ch.bend;
-      row.querySelector(".fr-name").textContent = `${fname(map[i] || "")}`;
-      row.querySelector(".fr-pct").textContent = ch.stale ? "—" : pct(b);
-      const fill = row.querySelector(".fill");
-      fill.style.width = pct(b).replace(" ", "");
-      fill.className = "fill " + (ch.stale ? "" : b >= 0.65 ? "bent" : b >= 0.25 ? "half" : "");
-      row.querySelector(".fr-word").textContent = ch.stale ? "нет данных" : bendWord(b);
-      const base = ch.cal.open ?? ch.rest;
-      row.querySelector(".fr-raw").textContent = ch.raw == null ? (S.mode === "bits" ? "0/1" : "")
-        : `сырое ${Math.round(ch.raw)}` + (base != null ? ` · Δ от ладони ${fmtDelta(ch.raw - base)}` : "");
-    });
-    const missing = 5 - Math.min(5, S.n_channels || 0);
-    $("#fingerNote").textContent = !S.n_channels ? "Подключите перчатку или демо"
-      : missing ? `Пальцы без сенсора показаны светлыми` : "";
 
     // ориентация
     $("#imuBox").hidden = !ori;
@@ -364,6 +341,7 @@
       $("#gestureList").innerHTML = templates.length ? templates.map(t => {
         const files = [...new Set([...audioFiles, ...(t.audio ? [t.audio] : [])])];
         return `<div class="learned-gesture" data-id="${esc(t.id)}">
+          <button class="gesture-thumbnail-button" data-gesture-action="view" aria-label="Посмотреть жест ${esc(t.name)}"><img class="gesture-thumbnail" data-thumbnail="${esc(t.id)}" alt="3D-эталон: ${esc(t.name)}" hidden><span class="small">Готовится 3D-вид…</span></button>
           <strong>${esc(t.name)}</strong><span class="small">${esc(compatibilityReason(t, gs))}</span>
           <label>Аудиофраза <select data-audio="${esc(t.id)}"><option value="">Аудио не назначено</option>${files.map(f => `<option value="${esc(f)}" ${f === t.audio ? "selected" : ""}>${esc(f)}${audioFiles.includes(f) ? "" : " (файл отсутствует)"}</option>`).join("")}</select></label>
           <span class="small">${t.audio_available ? "MP3 доступен" : t.audio ? "Файл MP3 отсутствует в папке" : "Аудио не назначено"}</span>
@@ -373,6 +351,8 @@
           <button class="ghost small" data-gesture-action="delete">Удалить</button></div></div>`;
       }).join("") : `<p class="muted">Жестов пока нет. Покажите позу и нажмите «Создать жест».</p>`;
     }
+    updateGestureDialog(gs);
+    fillThumbnails(templates);
     const r = S.audio?.results?.[0];
     const status = {queued:"поставлено в очередь", playing:"воспроизводится", finished:"воспроизведение завершено", unavailable:"аудио не назначено/недоступно", error:"ошибка проигрывателя", cancelled:"отменено", duplicate:"уже в очереди или играет", full:"очередь заполнена", stopped:"остановлено"};
     $("#audioResult").hidden = !r;
@@ -383,14 +363,143 @@
     $("#audioStatus").textContent = audio.active ? `Играет: ${audio.active.file}`
       : audio.queue?.length ? `В очереди: ${audio.queue.length}` : "";
   }
-  async function createGesture() {
-    const name = prompt("Название жеста. Покажите позу и держите её неподвижно около секунды:");
-    if (!name?.trim()) return;
-    try { await api("/api/gestures/train", {method:"POST", body:{name}}); }
-    catch(e) { toast(e.message, true); }
+  let gesturePreview = null, gestureDialog = null, thumbnailBusy = false;
+  const thumbnails = new Map();
+  const thumbnailKey = t => JSON.stringify([t.context.hand, t.context.channels.map(c => c.finger), t.reference]);
+
+  function applyThumbnails(templates) {
+    for (const t of templates) {
+      const image = $$("[data-thumbnail]").find(el => el.dataset.thumbnail === t.id);
+      if (!image) continue;
+      const url = thumbnails.get(thumbnailKey(t));
+      image.hidden = !url;
+      if (url && image.getAttribute("src") !== url) image.src = url;
+      image.nextElementSibling.textContent = url ? "Посмотреть" : "3D-вид недоступен";
+    }
   }
-  $("#createGesture").addEventListener("click", createGesture);
+  async function fillThumbnails(templates) {
+    applyThumbnails(templates);
+    if (thumbnailBusy || !window.FlexHand3D) return;
+    const missing = templates.filter(t => !thumbnails.has(thumbnailKey(t)));
+    if (!missing.length) return;
+    thumbnailBusy = true;
+    const host = document.createElement("div");
+    host.className = "thumbnail-render-host";
+    document.body.append(host);
+    let renderer;
+    try {
+      renderer = window.FlexHand3D.create(host, { animate: false });
+      for (const t of missing) {
+        const key = thumbnailKey(t);
+        thumbnails.set(key, renderer ? await renderer.snapshot(t) : null);
+      }
+    } catch (error) {
+      console.warn("Не удалось подготовить 3D-вид жеста:", error);
+      for (const t of missing) if (!thumbnails.has(thumbnailKey(t))) thumbnails.set(thumbnailKey(t), null);
+    } finally {
+      renderer?.dispose(); host.remove(); thumbnailBusy = false;
+      const current = S?.gesture_system?.templates || [];
+      const keys = new Set(current.map(thumbnailKey));
+      for (const key of thumbnails.keys()) if (!keys.has(key)) thumbnails.delete(key);
+      applyThumbnails(current);
+    }
+  }
+
+  function stopGesturePreview() {
+    gesturePreview?.dispose(); gesturePreview = null;
+  }
+  function openGestureDialog(template = null, viewOnly = false) {
+    gestureDialog = { id: template?.id, viewOnly, started: false, saved: viewOnly };
+    $("#gestureDialog").hidden = false;
+    $("#gestureDialogTitle").textContent = viewOnly ? "Сохранённый жест" : template ? "Обучить жест заново" : "Создать жест";
+    $("#gestureName").value = template?.name || "";
+    $("#gestureName").disabled = viewOnly;
+    $("#gestureDialogStatus").textContent = "";
+    $("#gesturePreview").hidden = viewOnly;
+    $("#gestureSaved").hidden = !viewOnly;
+    $("#gestureTrain").hidden = viewOnly;
+    $("#gesturePreviewHint").textContent = viewOnly ? "Сохранённый эталон. Светлые пальцы — без сенсоров." : "Покажите позу и держите её неподвижно около секунды. Светлые пальцы — без сенсоров.";
+    if (!viewOnly) {
+      gesturePreview = window.FlexHand3D?.create($("#gesturePreview"));
+      if (!gesturePreview) $("#gesturePreview").textContent = "3D-предпросмотр недоступен: требуется WebGL";
+      if (S) render();
+    } else updateGestureDialog(S.gesture_system);
+    $("#gestureName").focus();
+  }
+  function updateGestureDialog(gs) {
+    const dialog = gestureDialog;
+    if (!dialog) return;
+    const tr = gs.training, result = gs.training_result;
+    if (dialog.started && tr) dialog.sawTraining = true;
+    // WS мог пропустить всю секундную запись. После подтверждённого POST сверяем
+    // терминальный снимок через REST, чтобы не принять результат предыдущей записи.
+    if (dialog.started && dialog.startConfirmed && !dialog.sawTraining && !tr && result && !dialog.checking) {
+      dialog.checking = true;
+      api("/api/state").then(state => {
+        if (gestureDialog === dialog) {
+          dialog.sawTraining = true;
+          updateGestureDialog(state.gesture_system);
+        }
+      }).catch(e => toast(e.message, true)).finally(() => { dialog.checking = false; });
+    }
+    if (dialog.started && dialog.sawTraining && !tr && result) {
+      dialog.started = false;
+      $("#gestureDialogStatus").textContent = result.message;
+      if (result.status === "saved") { dialog.saved = true; dialog.id = result.id; stopGesturePreview(); }
+    }
+    if (dialog.saved) {
+      const template = gs.templates.find(t => t.id === dialog.id);
+      const url = template && thumbnails.get(thumbnailKey(template));
+      $("#gesturePreview").hidden = true;
+      $("#gestureSaved").hidden = !url;
+      if (url) $("#gestureSaved").src = url;
+      $("#gestureTrain").hidden = true;
+      $("#gesturePreviewHint").textContent = "Сохранённый эталон из записи. Светлые пальцы — без сенсоров. Ракурс фиксирован и не используется при распознавании.";
+    }
+    $("#gestureTrain").disabled = !!tr || dialog.started;
+    $("#gestureName").disabled = !!tr || dialog.started || dialog.saved;
+    $("#gestureClose").textContent = dialog.started ? "Отменить обучение" : "Закрыть";
+    if (dialog.started && tr) $("#gestureDialogStatus").textContent = `Запись: ${Math.round(tr.progress * 100)} %. Не двигайтесь`;
+  }
+  async function closeGestureDialog() {
+    const dialog = gestureDialog;
+    if (!dialog || dialog.closing) return;
+    dialog.closing = true;
+    await dialog.request;
+    if (gestureDialog?.started) {
+      try { await api("/api/gestures/cancel", {method:"POST"}); }
+      catch (e) { dialog.closing = false; toast(e.message, true); return; }
+    }
+    stopGesturePreview(); gestureDialog = null;
+    $("#gestureDialog").hidden = true;
+    $("#createGesture").focus();
+  }
+  $("#createGesture").addEventListener("click", () => openGestureDialog());
+  $("#gestureClose").addEventListener("click", closeGestureDialog);
+  $("#gestureTrain").addEventListener("click", async () => {
+    if (!gestureDialog || gestureDialog.started) return;
+    const name = $("#gestureName").value.trim();
+    if (!name) { $("#gestureName").focus(); return; }
+    const dialog = gestureDialog;
+    dialog.started = true;
+    dialog.sawTraining = false;
+    dialog.startConfirmed = false;
+    $("#gestureTrain").disabled = true;
+    dialog.request = api("/api/gestures/train", {method:"POST", body:{name, template_id:dialog.id}})
+      .then(() => { dialog.startConfirmed = true; })
+      .catch(e => { dialog.started = false; $("#gestureDialogStatus").textContent = e.message; $("#gestureTrain").disabled = false; });
+    await dialog.request;
+  });
   $("#cancelTraining").addEventListener("click", () => api("/api/gestures/cancel", {method:"POST"}).catch(e => toast(e.message, true)));
+  $("#gestureDialog").addEventListener("keydown", e => {
+    if (e.key === "Escape") { e.stopPropagation(); closeGestureDialog(); }
+    if (e.key === "Tab") {
+      const controls = $$("#gestureDialog button, #gestureDialog input").filter(el => !el.disabled && !el.hidden);
+      const first = controls[0], last = controls[controls.length - 1];
+      if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+      else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+    }
+  });
   $("#stopAudio").addEventListener("click", () => api("/api/audio/stop", {method:"POST"}).catch(e => toast(e.message, true)));
   $("#gestureList").addEventListener("click", async e => {
     const button = e.target.closest("button[data-gesture-action]");
@@ -402,7 +511,9 @@
         const name = prompt("Новое название", t.name);
         if (name?.trim()) await api(`/api/gestures/${id}`, {method:"PATCH", body:{name}});
       } else if (button.dataset.gestureAction === "retrain") {
-        await api("/api/gestures/train", {method:"POST", body:{name:t.name, template_id:id}});
+        openGestureDialog(t);
+      } else if (button.dataset.gestureAction === "view") {
+        openGestureDialog(t, true);
       } else if (button.dataset.gestureAction === "delete") {
         if (confirm(`Удалить жест «${t.name}»?`)) await api(`/api/gestures/${id}`, {method:"DELETE"});
       } else {
@@ -752,7 +863,7 @@
   // клавиши: 1..5 — согнуть/разогнуть палец канала в демо, стрелки — кисть, Esc — закрыть мастер
   document.addEventListener("keydown", (e) => {
     if (e.key === "Escape" && WZ.open) return closeWizard();
-    if (!S || S.source.kind !== "mock" || WZ.open || ["INPUT", "SELECT", "TEXTAREA"].includes(document.activeElement.tagName)) return;
+    if (!S || S.source.kind !== "mock" || WZ.open || gestureDialog || ["INPUT", "SELECT", "TEXTAREA"].includes(document.activeElement.tagName)) return;
     const k = parseInt(e.key, 10);
     if (k >= 1 && k <= S.n_channels) demoToggleFinger(S.finger_map[k - 1]);
     const arrows = { ArrowLeft: ["rollSlider", -15], ArrowRight: ["rollSlider", 15], ArrowUp: ["pitchSlider", 15], ArrowDown: ["pitchSlider", -15] };
@@ -762,6 +873,10 @@
       sl.value = Math.max(+sl.min, Math.min(+sl.max, +sl.value + step));
       sl.dispatchEvent(new Event("input"));
     }
+  });
+
+  window.addEventListener("pagehide", event => {
+    if (!event.persisted) { stopGesturePreview(); hand3d?.dispose(); }
   });
 
   // ---------------- старт ----------------

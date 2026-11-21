@@ -55,9 +55,32 @@ const FRAME_FILL_W = 0.9;      // и не больше этой доли шир�
 const FOV = 30;
 const KEY_DIR = new THREE.Vector3(-35, 40, 28).normalize();   // основной свет: слева-сверху-спереди
 
+function disposeTree(root, keepMaterial = null) {
+  const resources = new Set();
+  root.traverse(o => {
+    if (o.geometry) resources.add(o.geometry);
+    if (o.skeleton) resources.add(o.skeleton);
+    for (const mat of [o.material].flat().filter(Boolean)) {
+      if (mat === keepMaterial) continue;
+      for (const value of Object.values(mat)) if (value?.isTexture) resources.add(value);
+      resources.add(mat);
+    }
+  });
+  resources.forEach(r => r.dispose());
+}
+
+// Только эталон и его собственное соответствие каналов. IMU и текущие настройки не участвуют.
+export function templatePose(template) {
+  const channels = template.context.channels;
+  return { hand: template.context.hand, q: null,
+    sensed: new Set(channels.map(c => c.finger)),
+    bends: Object.fromEntries(channels.map((c, i) => [c.finger, template.reference[i]])) };
+}
+
 class Hand3D {
-  constructor(container) {
+  constructor(container, { animate = true } = {}) {
     this.container = container;
+    this.disposed = false;
     this.renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });   // бросит исключение без WebGL
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
     this.renderer.shadowMap.enabled = true;
@@ -118,7 +141,7 @@ class Hand3D {
     this._ro.observe(container);
     this._last = performance.now();
     this._loop = this._loop.bind(this);
-    requestAnimationFrame(this._loop);
+    if (animate) this._raf = requestAnimationFrame(this._loop);
   }
 
   // ---------------- модель ----------------
@@ -127,19 +150,27 @@ class Hand3D {
     if (hand === this.hand) return;
     this.hand = hand;
     const token = (this._loading = {});
+    this.ready = new Promise(resolve => {
     new GLTFLoader().load(MODEL_URL(hand), (gltf) => {
-      if (this._loading !== token) return;     // пока грузилась — переключили руку
+      if (this.disposed || this._loading !== token) { disposeTree(gltf.scene); resolve(); return; }
       try { this._useModel(this._prepareGltf(gltf)); }
-      catch (e) { console.warn("Модель руки не подошла, рисую запасную:", e); this._useModel(this._buildPrimitive()); }
+      catch (e) { disposeTree(gltf.scene, this.material); console.warn("Модель руки не подошла, рисую запасную:", e); this._useModel(this._buildPrimitive()); }
+      resolve();
     }, undefined, (err) => {
-      if (this._loading !== token) return;
+      if (this.disposed || this._loading !== token) { resolve(); return; }
       console.warn("Модель руки не загрузилась, рисую запасную:", err);
       this._useModel(this._buildPrimitive());
+      resolve();
+    });
     });
   }
 
   _useModel(model) {
-    if (this.model) this.handGroup.remove(this.model.root);
+    if (this.model) {
+      this.handGroup.remove(this.model.root);
+      disposeTree(this.model.root, this.material);
+      this.model.ghost?.dispose();
+    }
     this.model = model;
     this.handGroup.add(model.root);
     // Центр сферы совпадает с фиксированной точкой ладони; камера — под её размер
@@ -215,6 +246,7 @@ class Hand3D {
           diffuseColor.a *= 1.0 - 0.35 * vGhost;`);
     };
     mat.side = THREE.DoubleSide;              // срез у запястья: изнутри видна поверхность, а не «дыра»
+    for (const original of [mesh.material].flat()) original.dispose();
     mesh.material = mat;
     mesh.castShadow = true;
     mesh.receiveShadow = true;
@@ -407,10 +439,11 @@ class Hand3D {
   }
 
   _loop(now) {
-    requestAnimationFrame(this._loop);
+    if (this.disposed) return;
+    this._raf = requestAnimationFrame(this._loop);
     const dt = Math.min(0.1, Math.max(0, (now - this._last) / 1000));
     this._last = now;
-    if (document.hidden || !this.container.offsetParent) return;      // вкладка скрыта — не рисуем
+    if (document.hidden) return;
     const k = 1 - Math.exp(-dt / TAU_S);
     this.qCurrent.slerp(this.qTarget, k);
     this.pivot.quaternion.copy(this.qCurrent);
@@ -418,24 +451,60 @@ class Hand3D {
       this.bendCurrent[f] += (this.bendTarget[f] - this.bendCurrent[f]) * k;
       this._poseFinger(f, this.bendCurrent[f]);
     }
+    if (this.mirror && this.mirror.hand === this.hand) {
+      this.qCurrent.copy(this.mirror.qCurrent);
+      this.pivot.quaternion.copy(this.qCurrent);
+      for (const f of FINGERS) this._poseFinger(f, this.bendCurrent[f] = this.mirror.bendCurrent[f]);
+    }
     this.controls.update();
+    if (this.container.offsetParent) this.renderer.render(this.scene, this.camera);
+  }
+
+  /** Без интерполяции: снимок должен совпадать с медианой сохранённого эталона. */
+  async snapshot(template) {
+    this.setTarget(templatePose(template));
+    await this.ready;
+    if (this.disposed) return null;
+    this.qCurrent.copy(this.qTarget);
+    this.pivot.quaternion.copy(this.qCurrent);
+    for (const f of FINGERS) this._poseFinger(f, this.bendCurrent[f] = this.bendTarget[f]);
+    this.resetView();
     this.renderer.render(this.scene, this.camera);
+    return this.renderer.domElement.toDataURL("image/png");
+  }
+
+  dispose() {
+    if (this.disposed) return;
+    this.disposed = true;
+    cancelAnimationFrame(this._raf);
+    this._ro.disconnect();
+    this.controls.dispose();
+    disposeTree(this.scene, this.material);
+    this.model?.ghost?.dispose();
+    this.material.dispose();
+    this.key.shadow.dispose();
+    this.renderer.dispose();
+    this.renderer.forceContextLoss();
+    this.renderer.domElement.remove();
   }
 }
 
 function webglAvailable() {
   try {
     const c = document.createElement("canvas");
-    return !!(window.WebGLRenderingContext && (c.getContext("webgl2") || c.getContext("webgl")));
+    const gl = window.WebGLRenderingContext && (c.getContext("webgl2") || c.getContext("webgl"));
+    gl?.getExtension("WEBGL_lose_context")?.loseContext();
+    return !!gl;
   } catch (e) {
     return false;
   }
 }
 
 window.FlexHand3D = {
-  create(container) {
+  create(container, options) {
     if (!webglAvailable()) return null;
-    try { return new Hand3D(container); } catch (e) { console.warn("3D-рука недоступна:", e); return null; }
+    try { return new Hand3D(container, options); } catch (e) { console.warn("3D-рука недоступна:", e); return null; }
   },
+  templatePose,
 };
 window.dispatchEvent(new Event("hand3d-ready"));

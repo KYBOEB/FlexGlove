@@ -3,6 +3,7 @@ on: [push, pull_request]
 jobs:
   host:
     strategy:
+      fail-fast: false
       matrix:
         os: [windows-latest, ubuntu-latest]
     runs-on: ${{ matrix.os }}
@@ -33,3 +34,17 @@ jobs:
       - name: Windows BLE backend imports
         if: runner.os == 'Windows'
         run: python -c "from bleak.backends.winrt.scanner import BleakScannerWinRT; print('winrt ok')"
+      - name: Install browser for 3D gesture acceptance
+        run: |
+          python -m pip install playwright
+          python -m playwright install chromium
+      - name: Install Linux browser dependencies
+        if: runner.os == 'Linux'
+        run: python -m playwright install-deps chromium
+      - name: 3D gesture preview, cancellation, retraining and restart
+        run: python ../tools/qa_gesture_preview.py
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: gesture-preview-${{ matrix.os }}
+          path: docs/analysis/img/gesture-preview/

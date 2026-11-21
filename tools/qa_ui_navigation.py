@@ -106,7 +106,8 @@ def main(args):
                     def instrument(route):
                         response = route.fetch()
                         route.fulfill(response=response, body=response.text().replace(
-                            "return new Hand3D(container);", "return (window.__qaHand = new Hand3D(container));"))
+                            "return new Hand3D(container);", "return (window.__qaHand = new Hand3D(container));").replace(
+                            "return new Hand3D(container, options);", 'const h = new Hand3D(container, options); if (container.id === "hand3d") window.__qaHand = h; return h;'))
                     page.route("**/hand3d.js?*", instrument)
 
                     def api(path, data=None, method="post"):
@@ -151,11 +152,13 @@ def main(args):
                     if width == 1366:
                         assert page.locator("#audioResult").is_hidden()
                     name = "Указательный и средний"
-                    page.once("dialog", lambda dialog: dialog.accept(name))
                     page.locator("#createGesture").click()
+                    page.locator("#gestureName").fill(name)
+                    page.locator("#gestureTrain").click()
                     page.wait_for_function("document.querySelector('#cancelTraining').hidden === false")
                     shot("state-training")
                     page.wait_for_function("document.querySelector('#gestureList strong')?.textContent === 'Указательный и средний'")
+                    page.locator("#gestureClose").click()
                     template = state()["gesture_system"]["templates"][0]
                     assert len(template["reference"]) == 5
                     page.once("dialog", lambda dialog: dialog.accept("Поза <тест>"))

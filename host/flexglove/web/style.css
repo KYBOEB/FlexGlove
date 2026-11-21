@@ -52,7 +52,7 @@ button:disabled { opacity: .5; cursor: default; }
 button.ghost, .file-btn { background: transparent; color: var(--accent); }
 button.small { padding: 6px 10px; font-size: 13px; }
 button.danger { background: var(--bad); border-color: var(--bad); }
-select, input[type=number] { font: inherit; font-size: 14px; padding: 6px 10px; border: 1px solid var(--line); border-radius: 9px; background: #fff; }
+select, input[type=number], #gestureName { font: inherit; font-size: 14px; padding: 6px 10px; border: 1px solid var(--line); border-radius: 9px; background: #fff; }
 .row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin: 6px 0; }
 .row.between { justify-content: space-between; }
 .check { display: inline-flex; align-items: center; gap: 6px; font-size: 14px; color: var(--muted); }
@@ -254,3 +254,15 @@ body.on-hand main { padding: 0; max-width: none; }
 
 .error-text, #trainingStatus.error-text { color: var(--bad); }
 #audioStatus:not([hidden]) { margin-top: 12px; }
+
+/* Встроенные виды той же 3D-модели, в существующем оформлении. */
+.gesture-dialog-box { max-width: 480px; max-height: 94vh; overflow-y: auto; }
+.gesture-dialog-box > input { width: 100%; margin: 8px 0 12px; }
+.gesture-preview { display: block; width: 320px; height: 240px; max-width: 100%; margin: 12px auto;
+  background: radial-gradient(ellipse at 50% 38%, #f7f7f8, #d9dbde); border-radius: 12px; object-fit: contain; }
+.gesture-preview canvas { width: 100%; height: 100%; display: block; }
+.gesture-thumbnail { width: 144px; height: 108px; object-fit: contain; border-radius: 8px;
+  background: radial-gradient(ellipse at 50% 38%, #f7f7f8, #d9dbde); }
+.gesture-thumbnail-button { justify-self: start; padding: 0; background: transparent; border: 0; }
+.gesture-thumbnail-button span { display: block; }
+.thumbnail-render-host { position: fixed; left: -1000px; top: 0; width: 320px; height: 240px; pointer-events: none; }

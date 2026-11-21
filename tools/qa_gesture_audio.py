@@ -30,7 +30,7 @@ def main():
             page.goto(URL)
             page.wait_for_function("document.querySelector('#calStatus').textContent.includes('известные')")
             # Удаляются только результаты предыдущего запуска этой QA-базы.
-            assert page.request.get(URL + "/api/ping").json()["version"] == "0.8.0"
+            assert page.request.get(URL + "/api/ping").json()["version"] == "0.8.1"
             for template in page.request.get(URL + "/api/state").json()["gesture_system"]["templates"]:
                 page.request.delete(URL + "/api/gestures/" + template["id"])
             prior_event = page.request.get(URL + "/api/state").json()["gesture_system"]["triggered"]
@@ -38,11 +38,13 @@ def main():
             page.wait_for_function("!document.querySelector('#sideImu').textContent.includes('держите')")
             page.wait_for_timeout(1000)  # реальная анимация/фильтр, не тест временных порогов
             name = f"Поза {width}"
-            page.once("dialog", lambda dialog: dialog.accept(name))
             page.locator('.tab[data-tab="gestures"]').click()
             page.locator("#createGesture").click()
+            page.locator("#gestureName").fill(name)
+            page.locator("#gestureTrain").click()
             page.wait_for_function("name => document.querySelector('#gestureList strong')?.textContent === name", arg=name)
             page.wait_for_function("name => document.querySelector('#gestureWords').textContent === name", arg=name)
+            page.locator("#gestureClose").click()
             page.locator('.tab[data-tab="hand"]').click()
             page.screenshot(path=str(OUT / f"hand-{width}.png"))
             template = page.request.get(URL + "/api/state").json()["gesture_system"]["templates"][0]

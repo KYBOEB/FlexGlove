@@ -154,12 +154,6 @@
         </div>
       </details>
 <div class="signal-details">
-      <div class="side-block">
-        <div class="small muted">Пальцы</div>
-        <div class="fingers" id="fingerRows"></div>
-        <div class="small muted" id="fingerNote"></div>
-      </div>
-
       <div class="side-block" id="imuBox" hidden>
         <h2>Положение кисти</h2>
         <div class="small muted" id="sideImu"></div>
@@ -261,6 +255,21 @@
 </main>
 
 <!-- ================= мастер калибровки ================= -->
+<div class="modal" id="gestureDialog" role="dialog" aria-modal="true" aria-labelledby="gestureDialogTitle" hidden>
+  <div class="modal-box gesture-dialog-box">
+    <h2 id="gestureDialogTitle">Создать жест</h2>
+    <label for="gestureName">Название жеста</label>
+    <input id="gestureName" maxlength="80" autocomplete="off">
+    <div class="gesture-preview" id="gesturePreview"></div>
+    <img class="gesture-preview" id="gestureSaved" alt="Сохранённый эталон жеста" hidden>
+    <p class="hint" id="gesturePreviewHint">Покажите позу и держите её неподвижно около секунды. Светлые пальцы — без сенсоров.</p>
+    <p id="gestureDialogStatus" role="status"></p>
+    <div class="row wz-actions">
+      <button class="ghost" id="gestureClose">Закрыть</button>
+      <button id="gestureTrain">Записать жест</button>
+    </div>
+  </div>
+</div>
 <div class="modal" id="wizard" hidden>
   <div class="modal-box wizard-box">
     <div class="wz-steps"><span data-step="1">1. Ладонь</span><span data-step="2">2. Кулак</span><span data-step="3">3. Итог</span></div>
