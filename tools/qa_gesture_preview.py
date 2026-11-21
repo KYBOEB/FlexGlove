@@ -71,7 +71,33 @@ def mock(page, bends):
     page.wait_for_timeout(600)
 
 
+def train_until_saved(page):
+    """Нагруженный CI может задержать реальные отсчёты; автомат обязан отклонить их.
+
+    Повторяем только явный разрыв/нехватку данных, не меняя часы и пороги распознавателя.
+    Ошибка движения и другие ошибки остаются провалом сценария.
+    """
+    transient = ("Разрыв потока данных", "Недостаточно данных за секунду")
+    for attempt in range(5):
+        page.locator("#gestureTrain").click()
+        page.wait_for_function("""() => {
+          const button=document.querySelector('#gestureTrain');
+          return button.hidden || !button.disabled;
+        }""")
+        message = page.locator("#gestureDialogStatus").inner_text()
+        if "сохранён" in message:
+            return
+        if not message.startswith(transient):
+            raise AssertionError(message)
+        print(f"CI source retry {attempt + 1}: {message}", flush=True)
+        page.wait_for_timeout(800)
+    raise AssertionError("Пять записей отклонены из-за разрыва/нехватки данных")
+
+
 def main():
+    for stream in (sys.stdout, sys.stderr):
+        if hasattr(stream, "reconfigure"):
+            stream.reconfigure(encoding="utf-8", errors="replace")
     parser = argparse.ArgumentParser()
     parser.add_argument("--browser")
     args = parser.parse_args()
@@ -112,8 +138,7 @@ def main():
                   return main.qCurrent.angleTo(preview.qCurrent)<.001 && Object.keys(main.bendCurrent).every(f=>Math.abs(main.bendCurrent[f]-preview.bendCurrent[f])<.001);
                 }""")
                 page.screenshot(path=str(OUT / f"create-{width}.png"))
-                page.locator("#gestureTrain").click()
-                page.wait_for_function("document.querySelector('#gestureDialogStatus').textContent.includes('сохранён')")
+                train_until_saved(page)
                 wait_images(page)
                 page.wait_for_function("!document.querySelector('#gestureSaved').hidden")
                 page.screenshot(path=str(OUT / f"saved-{width}.png"))
@@ -165,8 +190,7 @@ def main():
                 page.wait_for_timeout(150)
                 mock(page, [.15] * 5)
                 page.wait_for_function("document.querySelector('#gestureDialogStatus').textContent.includes('движение')")
-                page.locator("#gestureTrain").click()
-                page.wait_for_function("document.querySelector('#gestureDialogStatus').textContent.includes('сохранён')")
+                train_until_saved(page)
                 page.locator("#gestureClose").click()
                 retry = state(page)["gesture_system"]["templates"][-1]
                 page.request.delete(URL + "/api/gestures/" + retry["id"])
@@ -189,8 +213,7 @@ def main():
                 page.locator("#gestureClose").click()
                 assert page.locator("[data-thumbnail]").get_attribute("src") == image
                 page.locator('[data-gesture-action="retrain"]').click()
-                page.locator("#gestureTrain").click()
-                page.wait_for_function("document.querySelector('#gestureDialogStatus').textContent.includes('сохранён')")
+                train_until_saved(page)
                 page.wait_for_function("old => document.querySelector('[data-thumbnail]').src !== old", arg=image)
                 wait_images(page)
                 new_image = page.locator("[data-thumbnail]").get_attribute("src")
@@ -212,8 +235,7 @@ def main():
                 page.wait_for_function("!document.querySelector('#sideImu').textContent.includes('держите')")
                 page.locator("#createGesture").click()
                 page.locator("#gestureName").fill("Левая: два сенсора")
-                page.locator("#gestureTrain").click()
-                page.wait_for_function("document.querySelector('#gestureDialogStatus').textContent.includes('сохранён')")
+                train_until_saved(page)
                 wait_images(page)
                 left = state(page)["gesture_system"]["templates"][-1]
                 assert left["context"]["hand"] == "left"
