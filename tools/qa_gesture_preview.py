@@ -110,12 +110,20 @@ def main():
     with tempfile.TemporaryDirectory(prefix="flexglove-preview-") as tmp, sync_playwright() as pw:
         db = Path(tmp) / "qa.db"
         server = start_server(db)
-        browser = pw.chromium.launch(args=["--use-angle=swiftshader", "--enable-unsafe-swiftshader"],
-                                     **({"executable_path": args.browser} if args.browser else {}))
+        launch_options = {"args": ["--use-angle=swiftshader", "--enable-unsafe-swiftshader"], "timeout": 30000}
+        if args.browser:
+            launch_options["executable_path"] = args.browser
+        browser = pw.chromium.launch(**launch_options)
         try:
             for width, height in [(1366, 768), (1920, 1080)]:
                 print("viewport", width, flush=True)
+                if width == 1920:
+                    # Отдельный GPU-процесс для каждого размера: Windows SwiftShader
+                    # может зависнуть при повторном открытии большой сцены после context loss.
+                    browser.close()
+                    browser = pw.chromium.launch(**launch_options)
                 page = browser.new_page(viewport={"width": width, "height": height}, device_scale_factor=1)
+                page.set_default_timeout(20000)
                 page.on("pageerror", lambda e: errors.append(str(e)))
                 page.route("**/hand3d.js?*", instrument)
                 drop = [False]
@@ -124,6 +132,7 @@ def main():
                     peer.on_message(lambda message: None if drop[0] else route.send(message))
                 page.route_web_socket("**/ws", websocket)
                 page.goto(URL + "/#gestures")
+                print("loaded", width, flush=True)
                 page.wait_for_function("window.__qaHands?.[0]?.model?.kind === 'gltf'")
                 page.wait_for_function("document.querySelector('#calStatus').textContent.includes('известные')")
                 page.wait_for_function("!document.querySelector('#sideImu').textContent.includes('держите')")
@@ -133,6 +142,7 @@ def main():
                 page.wait_for_function("!document.querySelector('.learned-gesture')")
                 mock(page, [.1, .8, .65, .1, .2])
                 prior = state(page)["gesture_system"]["triggered"]
+                print("rotate main", width, flush=True)
                 # Реальное вращение мышью главной сцены, затем открытие создания.
                 page.locator('a[href="#hand"]').click()
                 page.locator("#hand3d canvas").wait_for(state="visible")
@@ -144,6 +154,7 @@ def main():
                 page.mouse.move(x + 140, y - 80, steps=8)
                 page.mouse.up()
                 page.screenshot(path=str(OUT / f"rotated-main-{width}.png"))
+                print("rotated main captured", width, flush=True)
                 assert page.evaluate("""before => {
                   const h=window.__qaHands[0], dir=h.camera.position.clone().sub(h.controls.target).normalize();
                   return Math.hypot(...dir.toArray().map((v,i)=>v-before[i])) > .1;
@@ -170,6 +181,7 @@ def main():
                 assert view["direction_error"] < 1e-8 and view["up_error"] < 1e-8, view
                 assert view["center_error"] < 1e-8 and abs(view["distance"] - view["fit"]) < 1e-8, view
                 page.screenshot(path=str(OUT / f"create-{width}.png"))
+                print("camera mirror verified", width, flush=True)
                 train_until_saved(page)
                 wait_images(page)
                 page.wait_for_function("!document.querySelector('#gestureSaved').hidden")
