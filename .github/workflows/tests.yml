@@ -37,7 +37,10 @@ jobs:
       - name: Install browser for 3D gesture acceptance
         run: |
           python -m pip install playwright
-          python -m playwright install --with-deps chromium
+          python -m playwright install chromium
+      - name: Install Linux browser dependencies
+        if: runner.os == 'Linux'
+        run: python -m playwright install-deps chromium
       - name: 3D gesture preview, cancellation, retraining and restart
         run: python ../tools/qa_gesture_preview.py
       - uses: actions/upload-artifact@v4
