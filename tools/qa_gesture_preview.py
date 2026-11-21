@@ -33,6 +33,9 @@ def start_server(db):
     env = {**os.environ, "PYTHONPATH": str(ROOT / "host")}
     process = subprocess.Popen([sys.executable, "-m", "flexglove", "--demo", "--ui", "none",
                                "--port", str(PORT), "--db", str(db)], cwd=ROOT, env=env,
+                               # SwiftShader на Windows-runner занимает CPU. Только QA-процессу
+                               # даём приоритет отсчётов; часы и требования 20 отсчётов не меняем.
+                               creationflags=subprocess.HIGH_PRIORITY_CLASS if os.name == "nt" else 0,
                                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     for _ in range(100):
         try:
@@ -124,6 +127,7 @@ def main():
                 page.wait_for_function("window.__qaHands?.[0]?.model?.kind === 'gltf'")
                 page.wait_for_function("document.querySelector('#calStatus').textContent.includes('известные')")
                 page.wait_for_function("!document.querySelector('#sideImu').textContent.includes('держите')")
+                page.wait_for_function("Number(document.querySelector('#dbgRate').textContent) >= 20")
                 for t in state(page)["gesture_system"]["templates"]:
                     page.request.delete(URL + "/api/gestures/" + t["id"])
                 page.wait_for_function("!document.querySelector('.learned-gesture')")
