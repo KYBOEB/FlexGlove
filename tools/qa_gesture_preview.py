@@ -55,7 +55,18 @@ def instrument(route):
     response = route.fetch()
     source = response.text().replace(
         "return new Hand3D(container, options);",
-        "const h = new Hand3D(container, options); (window.__qaHands ||= []).push(h); return h;")
+        """const h = new Hand3D(container, options);
+        const originalRender=h.renderer.render.bind(h.renderer);
+        h.renderer.render=(...args) => {
+          if (h.mirror) {
+            const a=h.qCurrent.toArray(), b=h.mirror.qCurrent.toArray();
+            h.__qaMirrorAtRender={kind:h.model?.kind,
+              quaternionError:Math.max(...a.map((v,i)=>Math.abs(v-b[i]))),
+              bendError:Math.max(...Object.keys(h.bendCurrent).map(f=>Math.abs(h.bendCurrent[f]-h.mirror.bendCurrent[f])))};
+          }
+          return originalRender(...args);
+        };
+        (window.__qaHands ||= []).push(h); return h;""")
     route.fulfill(response=response, body=source)
 
 
@@ -185,10 +196,10 @@ def main():
                 page.locator("#gestureName").fill("Указательный и средний")
                 page.wait_for_function("window.__qaHands.some(h => !h.disposed && h.container.id==='gesturePreview' && h.model?.kind==='gltf')")
                 page.wait_for_timeout(300)
-                assert page.evaluate("""() => {
-                  const main=window.__qaHands[0], preview=window.__qaHands.find(h=>!h.disposed && h.container.id==='gesturePreview');
-                  return main.qCurrent.angleTo(preview.qCurrent)<.001 && Object.keys(main.bendCurrent).every(f=>Math.abs(main.bendCurrent[f]-preview.bendCurrent[f])<.001);
-                }""")
+                # Сравнение в момент вывода одного кадра, а не между независимыми RAF.
+                page.wait_for_function("window.__qaHands.find(h=>!h.disposed && h.container.id==='gesturePreview')?.__qaMirrorAtRender?.kind === 'gltf'")
+                frame = page.evaluate("window.__qaHands.find(h=>!h.disposed && h.container.id==='gesturePreview').__qaMirrorAtRender")
+                assert frame["quaternionError"] == 0 and frame["bendError"] == 0, frame
                 view = page.evaluate("""() => {
                   const main=window.__qaHands[0], h=window.__qaHands.find(h=>!h.disposed && h.container.id==='gesturePreview');
                   const a=main.camera.position.clone().sub(main.controls.target).normalize();
