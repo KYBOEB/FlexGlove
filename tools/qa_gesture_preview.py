@@ -12,6 +12,7 @@ import subprocess
 import sys
 import tempfile
 import time
+import traceback
 import urllib.request
 
 from playwright.sync_api import sync_playwright
@@ -124,6 +125,26 @@ def main():
                     browser = pw.chromium.launch(**launch_options)
                 page = browser.new_page(viewport={"width": width, "height": height}, device_scale_factor=1)
                 page.set_default_timeout(20000)
+                # SwiftShader оставляем время для ввода/CDP между кадрами.
+                # Ограничение только в QA-браузере; native RAF и отмена сохраняются.
+                if os.name == "nt":
+                    page.add_init_script("""const nativeRAF=window.requestAnimationFrame.bind(window);
+                      const nativeCancel=window.cancelAnimationFrame.bind(window);
+                      const pending=new Map(); let sequence=0;
+                      window.requestAnimationFrame=callback => {
+                        const id=++sequence;
+                        const timer=setTimeout(() => {
+                          const frame=nativeRAF(stamp => { pending.delete(id); callback(stamp); });
+                          pending.set(id,{frame});
+                        }, 65);
+                        pending.set(id,{timer}); return id;
+                      };
+                      window.cancelAnimationFrame=id => {
+                        const entry=pending.get(id);
+                        if (entry?.timer !== undefined) clearTimeout(entry.timer);
+                        if (entry?.frame !== undefined) nativeCancel(entry.frame);
+                        pending.delete(id);
+                      };""")
                 page.on("pageerror", lambda e: errors.append(str(e)))
                 page.route("**/hand3d.js?*", instrument)
                 drop = [False]
@@ -326,9 +347,13 @@ def main():
             page.locator("#gestureClose").click()
             page.close()
         except Exception:
+            traceback.print_exc()
             if 'page' in locals() and not page.is_closed():
-                page.screenshot(path=str(OUT / "failure.png"))
-                print(page.locator('#gestureDialogStatus').inner_text(), flush=True)
+                try:
+                    page.screenshot(path=str(OUT / "failure.png"), timeout=5000)
+                    print(page.locator('#gestureDialogStatus').inner_text(timeout=5000), flush=True)
+                except Exception as screenshot_error:
+                    print(f"Снимок браузера недоступен: {screenshot_error}", flush=True)
                 try:
                     print(json.dumps(state(page), ensure_ascii=False), flush=True)
                 except Exception as diagnostic_error:
